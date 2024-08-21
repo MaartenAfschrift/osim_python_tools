@@ -4,4 +4,6 @@ contains several python tools for workflows in opensim. I typically include this
 
 
 
+I stole some things from pyosim (InverseKinematics and InverseDynamics) and some 
+
 
