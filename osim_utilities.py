@@ -702,8 +702,94 @@ class osim_subject:
         return(impulse_trials)
 
 
+    # Getters
+    def get_modelpath(self):
+        return self.modelpath
 
-    # set functions
+    def get_trcfiles(self):
+        return self.trcfiles
+
+    def get_ikfiles(self):
+        return self.ikfiles
+
+    def get_nfiles(self):
+        return self.nfiles
+
+    def get_filenames(self):
+        return self.filenames
+
+    def get_general_id_settings(self):
+        return self.general_id_settings
+
+    def get_extload_settings(self):
+        return self.extload_settings
+
+    def get_ext_loads_dir(self):
+        return self.ext_loads_dir
+
+    def get_ik_directory(self):
+        return self.ik_directory
+
+    def get_id_directory(self):
+        return self.id_directory
+
+    def get_bodykin_folder(self):
+        return self.bodykin_folder
+
+    def get_extload_files(self):
+        return self.extload_files
+
+    def get_id_dat(self):
+        return self.id_dat
+
+    def get_bk_pos(self):
+        return self.bk_pos
+
+    def get_bk_vel(self):
+        return self.bk_vel
+
+    def get_ikdat(self):
+        return self.ikdat
+
+    def get_marker_dir(self):
+        return self.marker_dir
+
+    # Setters
+    def set_modelpath(self, modelpath):
+        self.modelpath = modelpath
+
+    def set_trcfiles(self, trcfiles):
+        self.trcfiles = trcfiles
+
+    def set_nfiles(self, nfiles):
+        self.nfiles = nfiles
+
+    def set_filenames(self, filenames):
+        self.filenames = filenames
+
+    def set_bodykin_folder(self, bodykin_folder):
+        self.bodykin_folder = bodykin_folder
+
+    def set_extload_files(self, extload_files):
+        self.extload_files = extload_files
+
+    def set_id_dat(self, id_dat):
+        self.id_dat = id_dat
+
+    def set_bk_pos(self, bk_pos):
+        self.bk_pos = bk_pos
+
+    def set_bk_vel(self, bk_vel):
+        self.bk_vel = bk_vel
+
+    def set_ikdat(self, ikdat):
+        self.ikdat = ikdat
+
+    def set_marker_dir(self, marker_dir):
+        self.marker_dir = marker_dir
+
+
+    # set functions (not from chatgpt)
     #---------------
     def set_general_id_settings(self, general_id_settings):
         self.general_id_settings = general_id_settings
