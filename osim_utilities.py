@@ -53,11 +53,12 @@ def readMotionFile(filename):
     labels = next_line.split()
 
     # get data
-    data = pd.DataFrame(columns=labels)
-    data = np.ndarray([nr, len(labels)])
+    data = np.full((nr, len(labels)), np.nan)
     for i in range(1, nr + 1):
         d = [float(x) for x in file_id.readline().split()]
-        data[i-1,:] = d
+        if len(d) == nc:
+            data[i-1,:] = d
+
     file_id.close()
     dat = pd.DataFrame(data, columns = labels)
 
@@ -107,9 +108,9 @@ class osim_subject:
         self.ikdat = []
         self.marker_dir = None # directory with trc files
 
-        # open model
-        self.model = osim.Model(self.modelpath)
-        self.model.initSystem()
+        # open model (this makes it difficult to save this with pickle)
+        #self.model = osim.Model(self.modelpath)
+        #self.model.initSystem()
 
         # read some default things from the model
         [self.modelmass, self.bodymass, self.bodynames]= self.getmodelmass()
@@ -123,30 +124,36 @@ class osim_subject:
     # get number of muscles in model
     def get_n_muscles(self):
         # Number of muscles.
+        model = osim.Model(self.modelpath)
+        model.initSystem()
         self.nMuscles = 0
         self.muscle_names = []
-        self.forceSet = self.model.getForceSet()
-        for i in range(self.forceSet.getSize()):
-            c_force_elt = self.forceSet.get(i)
+        forceSet = model.getForceSet()
+        for i in range(forceSet.getSize()):
+            c_force_elt = forceSet.get(i)
             if 'Muscle' in c_force_elt.getConcreteClassName():
                 self.nMuscles += 1
                 self.muscle_names.append(c_force_elt.getName())
 
     # get coordinates in the model
     def get_model_coordinates(self):
-        self.coord_set = self.model.getCoordinateSet()
+        model = osim.Model(self.modelpath)
+        model.initSystem()
+        coord_set = model.getCoordinateSet()
         self.coord_names = []
         self.ncoord = 0
-        for i in range(0, self.coord_set.getSize()):
-            self.coord_names.append(self.coord_set.get(i).getName())
+        for i in range(0, coord_set.getSize()):
+            self.coord_names.append(coord_set.get(i).getName())
             self.ncoord = self.ncoord + 1
 
     def getmodelmass(self):
         # read the opensim model
-        nbodies = self.model.getBodySet().getSize()
+        model = osim.Model(self.modelpath)
+        model.initSystem()
+        nbodies = model.getBodySet().getSize()
         m_bodies = np.full([nbodies], np.nan)
         bodynames = []
-        bodyset = self.model.get_BodySet()
+        bodyset = model.get_BodySet()
         for i in range(0, nbodies):
             bodynames.append(bodyset.get(i).getName())
             m_bodies[i] = bodyset.get(i).getMass()
@@ -189,7 +196,9 @@ class osim_subject:
         time = np.asarray(table.getIndependentColumn())
 
         # convert to radians
-        table = tableProcessor.processAndConvertToRadians(self.model)
+        model = osim.Model(self.modelpath)
+        model.initSystem()
+        table = tableProcessor.processAndConvertToRadians(model)
         columnLabels = list(table.getColumnLabels())
         return(columnLabels, table)
 
@@ -254,6 +263,8 @@ class osim_subject:
             ik_file = Path(os.path.join(self.ik_directory, self.filenames[itrial] + '.mot'))
             ik_data = self.read_ik(ik_file)
             self.ikdat.append(ik_data)
+        # also update list with ik files
+        self.set_ikfiles_fromfolder(self.ik_directory)
 
     def read_ik(self, ik_file):
         if ik_file.exists():
@@ -315,19 +326,21 @@ class osim_subject:
         lMT = np.zeros((nfr, self.nMuscles))
 
         # init state of model
-        s = self.model.initSystem()
-        state_vars = self.model.getStateVariableValues(s)
-        force_set = self.model.getMuscles()
+        model = osim.Model(self.modelpath)
+        model.initSystem()
+        s = model.initSystem()
+        state_vars = model.getStateVariableValues(s)
+        force_set = model.getMuscles()
         state_vars.setToZero()
-        self.model.setStateVariableValues(s, state_vars)
-        self.model.realizePosition(s)
+        model.setStateVariableValues(s, state_vars)
+        model.realizePosition(s)
 
         # read ik as time_series
         [columnLabels, table] = self.read_ik_as_timeseries(self.ikfiles[ifile])
         Qs = table.getMatrix().to_numpy()
 
         # get state variable names
-        stateVariableNames = self.model.getStateVariableNames()
+        stateVariableNames = model.getStateVariableNames()
         stateVariableNamesStr = [
             stateVariableNames.get(i) for i in range(
                 stateVariableNames.getSize())]
@@ -338,8 +351,8 @@ class osim_subject:
             for j in range(0, len(columnLabels)):
                 index = stateVariableNamesStr.index(columnLabels[j])
                 state_vars.set(index, Qs[i,j])
-            self.model.setStateVariableValues(s, state_vars)
-            self.model.realizePosition(s)
+            model.setStateVariableValues(s, state_vars)
+            model.realizePosition(s)
             # loop over muscles to get muscle-tendon length
             for m in range(0, self.nMuscles):
                 muscle_m = self.forceSet.get(self.muscle_names[m])
@@ -364,19 +377,20 @@ class osim_subject:
         dM = np.zeros((nfr, self.nMuscles * self.ncoord))
 
         # init state of model
-        s = self.model.initSystem()
-        state_vars = self.model.getStateVariableValues(s)
-        force_set = self.model.getMuscles()
+        model = osim.Model(self.modelpath)
+        s = model.initSystem()
+        state_vars = model.getStateVariableValues(s)
+        force_set = model.getMuscles()
         state_vars.setToZero()
-        self.model.setStateVariableValues(s, state_vars)
-        self.model.realizePosition(s)
+        model.setStateVariableValues(s, state_vars)
+        model.realizePosition(s)
 
         # read ik as time_series
         [columnLabels, table] = self.read_ik_as_timeseries(self.ikfiles[ifile])
         Qs = table.getMatrix().to_numpy()
 
         # get state variable names
-        stateVariableNames = self.model.getStateVariableNames()
+        stateVariableNames = model.getStateVariableNames()
         stateVariableNamesStr = [
             stateVariableNames.get(i) for i in range(
                 stateVariableNames.getSize())]
@@ -388,17 +402,17 @@ class osim_subject:
             for j in range(0, len(columnLabels)):
                 index = stateVariableNamesStr.index(columnLabels[j])
                 state_vars.set(index, Qs[i, j])
-            self.model.setStateVariableValues(s, state_vars)
-            self.model.realizePosition(s)
+            model.setStateVariableValues(s, state_vars)
+            model.realizePosition(s)
             # loop over muscles to get muscle-tendon length
             for m in range(0, self.nMuscles):
                 muscle_m = self.forceSet.get(self.muscle_names[m])
                 muscle_m = osim.Muscle.safeDownCast(muscle_m)
                 for j in range(0, self.ncoord):
                     # this step is computationally very expensive
-                    dM[i, m + j * self.nMuscles] = muscle_m.computeMomentArm(s, self.model.getCoordinateSet().get(j))
+                    dM[i, m + j * self.nMuscles] = muscle_m.computeMomentArm(s, model.getCoordinateSet().get(j))
                     if i == 0:
-                        self.dM_names.append(muscle_m.getName() + '_' + self.model.getCoordinateSet().get(j).getName())
+                        self.dM_names.append(muscle_m.getName() + '_' + model.getCoordinateSet().get(j).getName())
             # print current stage per 500 processed frames
             if np.remainder(i, 100) == 0:
                 print('computing moment arms: frame ' , i , '/' ,  nfr)
@@ -421,19 +435,20 @@ class osim_subject:
         dM = np.zeros((nfr, self.nMuscles * self.ncoord))
 
         # init state of model
-        s = self.model.initSystem()
-        state_vars = self.model.getStateVariableValues(s)
-        force_set = self.model.getMuscles()
+        model = osim.Model(self.modelpath)
+        s = model.initSystem()
+        state_vars = model.getStateVariableValues(s)
+        force_set = model.getMuscles()
         state_vars.setToZero()
-        self.model.setStateVariableValues(s, state_vars)
-        self.model.realizePosition(s)
+        model.setStateVariableValues(s, state_vars)
+        model.realizePosition(s)
 
         # read ik as time_series
         [columnLabels, table] = self.read_ik_as_timeseries(self.ikfiles[ifile])
         Qs = table.getMatrix().to_numpy()
 
         # get state variable names
-        stateVariableNames = self.model.getStateVariableNames()
+        stateVariableNames = model.getStateVariableNames()
         stateVariableNamesStr = [
             stateVariableNames.get(i) for i in range(
                 stateVariableNames.getSize())]
@@ -443,7 +458,7 @@ class osim_subject:
         for j in range(0, self.ncoord):
             for m in range(0, self.nMuscles):
                 muscle_m = self.forceSet.get(self.muscle_names[m])
-                self.dM_names.append(muscle_m.getName() + '_' + self.model.getCoordinateSet().get(j).getName())
+                self.dM_names.append(muscle_m.getName() + '_' + model.getCoordinateSet().get(j).getName())
 
         # loop over all frames
         for i in range(0, nfr):
@@ -451,8 +466,8 @@ class osim_subject:
             for j in range(0, len(columnLabels)):
                 index = stateVariableNamesStr.index(columnLabels[j])
                 state_vars.set(index, Qs[i, j])
-            self.model.setStateVariableValues(s, state_vars)
-            self.model.realizePosition(s)
+            model.setStateVariableValues(s, state_vars)
+            model.realizePosition(s)
 
             # get relevant muscles for this coordinate
             for j in range(0, self.ncoord):
@@ -464,9 +479,9 @@ class osim_subject:
                     muscle_m = self.forceSet.get(self.muscle_names[m])
                     muscle_m = osim.Muscle.safeDownCast(muscle_m)
                     # this step is computationally very expensive
-                    dM[i, m + j * self.nMuscles] = muscle_m.computeMomentArm(s, self.model.getCoordinateSet().get(j))
+                    dM[i, m + j * self.nMuscles] = muscle_m.computeMomentArm(s, model.getCoordinateSet().get(j))
                     if i == 0:
-                        self.dM_names.append(muscle_m.getName() + '_' + self.model.getCoordinateSet().get(j).getName())
+                        self.dM_names.append(muscle_m.getName() + '_' + model.getCoordinateSet().get(j).getName())
             # print current stage per 500 processed frames
             if np.remainder(i, 100) == 0:
                 print('computing moment arms: frame ' , i , '/' ,  nfr)
@@ -484,15 +499,16 @@ class osim_subject:
     # identifying the relevant dofs for each muscle
     def identify_relevant_dofs_dM(self):
         # init state of model
-        s = self.model.initSystem()
-        state_vars = self.model.getStateVariableValues(s)
-        force_set = self.model.getMuscles()
+        model = osim.Model(self.modelpath)
+        s = model.initSystem()
+        state_vars = model.getStateVariableValues(s)
+        force_set = model.getMuscles()
         state_vars.setToZero()
-        self.model.setStateVariableValues(s, state_vars)
-        self.model.realizePosition(s)
+        model.setStateVariableValues(s, state_vars)
+        model.realizePosition(s)
 
         # get state variable names
-        stateVariableNames = self.model.getStateVariableNames()
+        stateVariableNames = model.getStateVariableNames()
         stateVariableNamesStr = [
             stateVariableNames.get(i) for i in range(
                 stateVariableNames.getSize())]
@@ -509,8 +525,8 @@ class osim_subject:
             lmt = np.zeros((len(xvar), self.nMuscles))
             for j in range(0, len(xvar)):
                 state_vars.set(index, xvar[j])
-                self.model.setStateVariableValues(s, state_vars)
-                self.model.realizePosition(s)
+                model.setStateVariableValues(s, state_vars)
+                model.realizePosition(s)
                 # loop over muscles to get muscle-tendon length
                 for m in range(0, self.nMuscles):
                     muscle_m = self.forceSet.get(self.muscle_names[m])
@@ -571,7 +587,7 @@ class osim_subject:
             self.lmt_dat.append(moment_arm)
 
     # inverse kinematics using api
-    def compute_inverse_kinematics(self, boolRead = True):
+    def compute_inverse_kinematics(self, boolRead = True, overwrite = False):
         # solves inverse dynamics on all trc files
         output_settings = os.path.join(self.ik_directory, 'settings')
         if not os.path.isdir(output_settings):
@@ -581,7 +597,8 @@ class osim_subject:
                         xml_input=self.general_ik_settings,
                         xml_output=output_settings,
                         trc_files=self.trcfiles,
-                        mot_output=self.ik_directory)
+                        mot_output=self.ik_directory,
+                        overwrite = overwrite)
         if boolRead:
             self.read_ikfiles()
 
@@ -605,22 +622,25 @@ class osim_subject:
             self.read_idfiles()
 
     # body kinematics using api
-    def compute_bodykin(self, boolRead = True):
+    def compute_bodykin(self, boolRead = True, overwrite = False):
         # function to compute bodykinematics
         bkdir = (f'{self.bodykin_folder.resolve()}')
         if not os.path.isdir(bkdir):
             os.makedirs(bkdir)
-        bodykinematics(self.modelpath, bkdir, self.ikfiles)
+        bodykinematics(self.modelpath, bkdir, self.ikfiles, overwrite = overwrite)
         # read the bk files
         if boolRead:
             self.read_bkfiles()
 
+    # compute kinetic energy bodies
     def compute_Ekin_bodies(self):
         print('start computation kinetic energy')
         # computes kinetic energy of all rigid bodies
         bk_header = self.bk_header
-        nbodies = self.model.getBodySet().getSize()
-        bodyset = self.model.getBodySet()
+        model = osim.Model(self.modelpath)
+        model.initSystem()
+        nbodies = model.getBodySet().getSize()
+        bodyset = model.getBodySet()
         Ekin_trials =[]
         for ifile in range(0, self.nfiles):
             bk_pos = self.bk_pos[ifile]
@@ -677,8 +697,10 @@ class osim_subject:
     def compute_linear_impulse_bodies(self):
         # computes the linear impulse of all bodies
         print('started with computation linear impulse of all bodies')
-        nbodies = self.model.getBodySet().getSize()
-        bodyset = self.model.getBodySet()
+        model = osim.Model(self.modelpath)
+        model.initSystem()
+        nbodies = model.getBodySet().getSize()
+        bodyset = model.getBodySet()
         impulse_trials =[]
         for ifile in range(0, self.nfiles):
             bk_pos = self.bk_pos[ifile]
@@ -768,6 +790,8 @@ class osim_subject:
         self.filenames = filenames
 
     def set_bodykin_folder(self, bodykin_folder):
+        if not isinstance(bodykin_folder, Path):
+            bodykin_folder = Path(bodykin_folder)
         self.bodykin_folder = bodykin_folder
 
     def set_extload_files(self, extload_files):
@@ -798,20 +822,30 @@ class osim_subject:
         self.extload_settings = general_loads_settings
 
     def set_id_directory(self, id_directory):
+        if not isinstance(id_directory, Path):
+            id_directory = Path(id_directory)
+        if not os.path.isdir(id_directory):
+            os.makedirs(id_directory)
         self.id_directory = id_directory
 
     def set_ext_loads_dir(self, ext_loads_dir):
-        self.ext_loads_dir = self.ext_loads_dir
+        if not isinstance(ext_loads_dir, Path):
+            ext_loads_dir = Path(ext_loads_dir)
+        self.ext_loads_dir = ext_loads_dir
 
     def set_general_ik_settings(self, general_ik_settings):
         self.general_ik_settings = general_ik_settings
 
     def set_ik_directory(self, ik_directory):
-        self.ik_directory = ik_directory
+        if not isinstance(ik_directory, Path):
+            ik_directory = Path(ik_directory)
         if not os.path.isdir(ik_directory):
             os.makedirs(ik_directory)
+        self.ik_directory = ik_directory
 
     def set_marker_directory(self, marker_dir):
+        if not isinstance(marker_dir, Path):
+            marker_dir = Path(marker_dir)
         self.marker_dir = marker_dir
 
     # specific functions for project at Ajax:

@@ -4,7 +4,7 @@ Inverse kinematic class in pyosim
 from pathlib import Path
 
 import opensim as osim
-
+import os
 
 class InverseKinematics:
     """
@@ -66,7 +66,8 @@ class InverseKinematics:
             mot_output,
             onsets=None,
             prefix=None,
-            multi=False
+            multi=False,
+            overwrite = False
     ):
         self.model_input = model_input
         self.mot_output = mot_output
@@ -75,6 +76,7 @@ class InverseKinematics:
         self.xml_output = xml_output
         self.multi = multi
         self.prefix = prefix
+        self.overwrite = overwrite
 
         if prefix:
             self.prefix = prefix
@@ -98,35 +100,44 @@ class InverseKinematics:
             pool.map(self.run_ik_tool, self.trc_files)
         else:
             for itrial in self.trc_files:
-                self.run_ik_tool(itrial)
+                self.run_ik_tool(itrial, bool_overwrite = self.overwrite)
 
-    def run_ik_tool(self, trial):
-        model = osim.Model(self.model_input)
-        # initialize inverse kinematic tool from setup file
-        ik_tool = osim.InverseKinematicsTool(self.xml_input)
-        ik_tool.setModel(model)
+    def run_ik_tool(self, trial, bool_overwrite = False):
 
         # set name of input (trc) file and output (mot)
         if self.prefix:
             filename = f"{self.prefix}_{trial.stem}"
         else:
             filename = trial.stem
-        ik_tool.setName(filename)
-        ik_tool.setMarkerDataFileName(f'{trial}')
-        ik_tool.setOutputMotionFileName(f"{Path(self.mot_output) / filename}.mot")
-        ik_tool.setResultsDir(self.mot_output)
+        output_motion_file = f"{Path(self.mot_output) / filename}.mot"
 
-        if self.onsets:
-            if trial.stem in self.onsets:
-                # set start and end times from configuration file
-                start = self.onsets[trial.stem][0]
-                end = self.onsets[trial.stem][1]
+        # only run analysis if we are allowed to overwrite file (if the file exists)
+        # or if the output file does not exist
+        if (not(os.path.exists(output_motion_file))) | bool_overwrite:
+
+            model = osim.Model(self.model_input)
+            # initialize inverse kinematic tool from setup file
+            ik_tool = osim.InverseKinematicsTool(self.xml_input)
+            ik_tool.setModel(model)
+            ik_tool.setName(filename)
+            ik_tool.setMarkerDataFileName(f'{trial}')
+            ik_tool.setOutputMotionFileName(output_motion_file)
+            ik_tool.setResultsDir(self.mot_output)
+
+            if self.onsets:
+                if trial.stem in self.onsets:
+                    # set start and end times from configuration file
+                    start = self.onsets[trial.stem][0]
+                    end = self.onsets[trial.stem][1]
+            else:
+                # use the trc file to get the start and end times
+                m = osim.MarkerData(f'{trial}')
+                start = m.getStartFrameTime()
+                end = m.getLastFrameTime() - 1e-2  # -1e-2 because removing last frame resolves some bug
+            ik_tool.setStartTime(start)
+            ik_tool.setEndTime(end)
+            #ik_tool.printToXML(self.xml_output)
+            ik_tool.run()
         else:
-            # use the trc file to get the start and end times
-            m = osim.MarkerData(f'{trial}')
-            start = m.getStartFrameTime()
-            end = m.getLastFrameTime() - 1e-2  # -1e-2 because removing last frame resolves some bug
-        ik_tool.setStartTime(start)
-        ik_tool.setEndTime(end)
-        #ik_tool.printToXML(self.xml_output)
-        ik_tool.run()
+            print(output_motion_file + ' does already exist, skipping ik analysis')
+
