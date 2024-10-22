@@ -122,7 +122,7 @@ class InverseKinematics:
             ik_tool.setName(filename)
             ik_tool.setMarkerDataFileName(f'{trial}')
             ik_tool.setOutputMotionFileName(output_motion_file)
-            ik_tool.setResultsDir(self.mot_output)
+            ik_tool.setResultsDir(str(self.mot_output))
 
             if self.onsets:
                 if trial.stem in self.onsets:

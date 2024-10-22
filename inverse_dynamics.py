@@ -31,6 +31,8 @@ class InverseDynamics:
         Cutoff frequency for an optional low pass filter on coordinates
     multi : bool, optional
         Launch InverseDynamics in multiprocessing if True
+    force_names: list with name of the force files (in case the filename of your forces file is
+        not the same as the mot_files)
 
     # Examples
     # --------
@@ -72,7 +74,8 @@ class InverseDynamics:
             forces_dir=None,
             prefix=None,
             low_pass=None,
-            multi=False
+            multi=False,
+            force_names = None,
     ):
         self.model_input = model_input
         self.xml_input = xml_input
@@ -83,6 +86,7 @@ class InverseDynamics:
         self.low_pass = low_pass
         self.multi = multi
         self.prefix = prefix
+        self.force_names = force_names
 
         if not isinstance(mot_files, list):
             self.mot_files = [mot_files]
@@ -99,13 +103,16 @@ class InverseDynamics:
             import os
             from multiprocessing import Pool
 
+            indices = list(range(1, len(self.mot_files)))
             pool = Pool(os.cpu_count())
-            pool.map(self.run_id_tool, self.mot_files)
+            pool.map(self.run_id_tool, self.mot_files, indices)
         else:
+            ct = 0
             for itrial in self.mot_files:
-                self.run_id_tool(itrial)
+                self.run_id_tool(itrial,ct)
+                ct = ct+1
 
-    def run_id_tool(self, trial):
+    def run_id_tool(self, trial, index_ftrial):
         print(f'\t{trial.stem}')
 
         # initialize inverse dynamic tool from setup file
@@ -135,18 +142,25 @@ class InverseDynamics:
         # external loads file
         if self.forces_dir:
             loads = osim.ExternalLoads(self.xml_forces, True)
-            if self.prefix:
+            if self.force_names is None: # assumes equal names or with prefix
+                if self.prefix:
+                    loads.setDataFileName(
+                        f"{Path(self.forces_dir, trial.stem.replace(f'{self.prefix}_', '')).resolve()}.sto"
+                    )
+                else:
+                    loads.setDataFileName(
+                        f"{Path(self.forces_dir, trial.stem).resolve()}.sto"
+                    )
+            else: # assumes different names (setting force_names)
                 loads.setDataFileName(
-                    f"{Path(self.forces_dir, trial.stem.replace(f'{self.prefix}_', '')).resolve()}.sto"
+                    f"{Path(self.forces_dir, self.force_names[index_ftrial]).resolve()}.sto"
                 )
-            else:
-                loads.setDataFileName(
-                    f"{Path(self.forces_dir, trial.stem).resolve()}.sto"
-                )
+
             temp_xml = Path(os.path.join(self.forces_dir,trial.stem + '_extloads.xml'))
             loads.printToXML(f'{temp_xml.resolve()}')  # temporary xml file
             id_tool.setExternalLoadsFileName(f'{temp_xml}')
 
+        # run inverse dynamics
         id_tool.run()
 
         #if self.forces_dir:

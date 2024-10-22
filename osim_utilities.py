@@ -1,3 +1,4 @@
+import glob
 import os
 from pathlib import Path
 import opensim as osim
@@ -9,6 +10,7 @@ from inverse_kinematics import InverseKinematics
 from kinematic_analyses import bodykinematics
 from scipy import signal
 import scipy.interpolate as interpolate
+import difflib
 
 def readMotionFile(filename):
     """ Reads OpenSim .mot and .sto files.
@@ -100,6 +102,8 @@ class osim_subject:
         self.ik_directory = self.maindir.joinpath('IK')
         self.id_directory = self.maindir.joinpath('ID')
         self.bodykin_folder = self.maindir.joinpath('BK')
+        self.moment_arm_folder = self.maindir.joinpath('moment_arm')
+        self.lmt_folder = self.maindir.joinpath('lmt')
         self.extload_files = []
         self.id_dat = [] # inverse dynamics data
         self.bk_pos = [] # bodykinematics data -- position
@@ -107,8 +111,10 @@ class osim_subject:
         self.ikdat = []
         self.ikdat = []
         self.marker_dir = None # directory with trc files
+        self.folder_grfdat = None
+        self.matched_grfs = None # list with matching grfdat names for the motion files
 
-        # open model (this makes it difficult to save this with pickle)
+        # open model (this makes it difficult to save this with pickle, so we open and close is all the time again)
         #self.model = osim.Model(self.modelpath)
         #self.model.initSystem()
 
@@ -316,14 +322,11 @@ class osim_subject:
     #           Computations
     #------------------------------
 
-    def get_LMT_ifile(self, ifile):
+    def get_LMT_ifile(self, ifile, tstart = None, tend = None):
 
         # get time vector and number of frames.
         t = self.ikdat[ifile].time
         nfr = len(t)
-
-        # pre allocate output
-        lMT = np.zeros((nfr, self.nMuscles))
 
         # init state of model
         model = osim.Model(self.modelpath)
@@ -345,8 +348,18 @@ class osim_subject:
             stateVariableNames.get(i) for i in range(
                 stateVariableNames.getSize())]
 
+        # select frames in time window
+        if tstart is None:
+            tstart = t[0]
+        if tend is None:
+            tend = t[-1]
+        indices = np.where((t >= tstart) & (t <= tend))[0]
+        # pre allocate output
+        lMT = np.zeros((len(indices), self.nMuscles))
+
         # loop over all frames
-        for i in range(0, nfr):
+        cti = 0
+        for i in indices:
             # set state from current frame
             for j in range(0, len(columnLabels)):
                 index = stateVariableNamesStr.index(columnLabels[j])
@@ -357,11 +370,13 @@ class osim_subject:
             for m in range(0, self.nMuscles):
                 muscle_m = self.forceSet.get(self.muscle_names[m])
                 muscle_m = osim.Muscle.safeDownCast(muscle_m)
-                lMT[i,m] = muscle_m.getLength(s)
+                lMT[cti,m] = muscle_m.getLength(s)
+            # update counter
+            cti = cti +1
 
         # return lmt as a dataframe
         data = np.concatenate(
-            (np.expand_dims(t, axis=1), lMT), axis=1)
+            (np.expand_dims(t[indices], axis=1), lMT), axis=1)
         columns = ['time'] + self.muscle_names
         muscle_tendon_lengths = pd.DataFrame(data=data, columns=columns)
 
@@ -425,14 +440,11 @@ class osim_subject:
 
         return moment_arms
 
-    def get_dM_ifile_fast(self, ifile):
+    def get_dM_ifile_fast(self, ifile, tstart = None, tend = None):
 
         # get time vector and number of frames.
         t = self.ikdat[ifile].time
         nfr = len(t)
-
-        # pre allocate output
-        dM = np.zeros((nfr, self.nMuscles * self.ncoord))
 
         # init state of model
         model = osim.Model(self.modelpath)
@@ -460,8 +472,18 @@ class osim_subject:
                 muscle_m = self.forceSet.get(self.muscle_names[m])
                 self.dM_names.append(muscle_m.getName() + '_' + model.getCoordinateSet().get(j).getName())
 
+        # select frames in time window
+        if tstart is None:
+            tstart = t[0]
+        if tend is None:
+            tend = t[-1]
+        indices = np.where((t >= tstart) & (t <= tend))[0]
+        # pre allocate output
+        dM = np.zeros((len(indices), self.nMuscles * self.ncoord))
+
         # loop over all frames
-        for i in range(0, nfr):
+        cti = 0
+        for i in indices:
             # set state from current frame
             for j in range(0, len(columnLabels)):
                 index = stateVariableNamesStr.index(columnLabels[j])
@@ -479,16 +501,18 @@ class osim_subject:
                     muscle_m = self.forceSet.get(self.muscle_names[m])
                     muscle_m = osim.Muscle.safeDownCast(muscle_m)
                     # this step is computationally very expensive
-                    dM[i, m + j * self.nMuscles] = muscle_m.computeMomentArm(s, model.getCoordinateSet().get(j))
+                    dM[cti, m + j * self.nMuscles] = muscle_m.computeMomentArm(s, model.getCoordinateSet().get(j))
                     if i == 0:
                         self.dM_names.append(muscle_m.getName() + '_' + model.getCoordinateSet().get(j).getName())
             # print current stage per 500 processed frames
-            if np.remainder(i, 100) == 0:
+            if np.remainder(cti, 100) == 0:
                 print('computing moment arms: frame ' , i , '/' ,  nfr)
+            # update counter
+            cti = cti+1
 
-        # return lmt as a dataframe
+        # return moment arms as a dataframe
         data = np.concatenate(
-            (np.expand_dims(t, axis=1), dM), axis=1)
+            (np.expand_dims(t[indices], axis=1), dM), axis=1)
         columns = ['time'] + self.dM_names
         moment_arms = pd.DataFrame(data=data, columns=columns)
 
@@ -537,7 +561,7 @@ class osim_subject:
             index_muscles = np.where(np.abs(d_lmt)>0.0001)
             self.dofs_dm[columnLabels[i]] = index_muscles[0]
 
-    def compute_lmt(self, boolprint = True):
+    def compute_lmt(self, boolprint = True, tstart = None, tend = None):
         # read all ik file if needed
         if len(self.ikdat) == 0:
             self.read_ikfiles()
@@ -549,7 +573,7 @@ class osim_subject:
             lmt = self.get_LMT_ifile(ifile)
 
             # print to a csv file -- lmt
-            outpath =  os.path.join(self.maindir, 'LMT')
+            outpath =  self.lmt_folder
             if not os.path.exists(outpath ):
                 os.makedirs(outpath)
             trialname = f'{self.ikfiles[ifile].stem}'
@@ -558,7 +582,8 @@ class osim_subject:
                 lmt.to_csv(outfile)
             self.lmt_dat.append(lmt)
 
-    def compute_dM(self, boolprint = True, fastversion = True):
+    def compute_dM(self, boolprint = True, fastversion = True,
+                   tstart = None, tend = None):
         # read all ik file if needed
         if len(self.ikdat) == 0:
             self.read_ikfiles()
@@ -568,23 +593,23 @@ class osim_subject:
             self.identify_relevant_dofs_dM()
 
         # compute for each ik file the muscle tendon lengths
-        self.lmt_dat = []
+        self.dm_dat = []
         for ifile in range(0, self.nfiles):
-            # get muscle tendon lengths
+            # get moment arms
             if fastversion:
-                moment_arm = self.get_dM_ifile_fast(ifile)
+                moment_arm = self.get_dM_ifile_fast(ifile, tstart = tstart, tend = tend)
             else:
                 moment_arm = self.get_dM_ifile(ifile)
 
             # print to a csv file -- lmt
-            outpath =  os.path.join(self.maindir, 'moment_arm')
+            outpath =  self.moment_arm_folder
             if not os.path.exists(outpath ):
                 os.makedirs(outpath)
             trialname = f'{self.ikfiles[ifile].stem}'
             outfile = os.path.join(outpath, trialname + '_dM.csv')
             if boolprint:
                 moment_arm.to_csv(outfile)
-            self.lmt_dat.append(moment_arm)
+            self.dm_dat.append(moment_arm)
 
     # inverse kinematics using api
     def compute_inverse_kinematics(self, boolRead = True, overwrite = False):
@@ -602,6 +627,47 @@ class osim_subject:
         if boolRead:
             self.read_ikfiles()
 
+    # generate external loads files
+    # here we want to link each grf file to the correct motion. We assume that the filename is similar.
+    def match_marker_grf_files(self, overwrite = False):
+        self.matched_grfs = []
+        # the grf files are in self.folder_grfdat
+        if self.folder_grfdat is not None:
+            # try to find the grf files
+            #   1. get all files with .sto extension in grf folder
+            #grf_files = glob.glob(os.path.join(self.folder_grfdat, ".sto"))
+            # find all .trc files in a folder
+            grf_files = []
+            for file in os.listdir(self.folder_grfdat):
+                # Check if the file ends with .mot
+                if file.endswith('.sto'):
+                    grf_files.append(os.path.join(self.folder_grfdat, file))
+            # convert to Path objects
+            if not isinstance(grf_files[0], Path):
+                grf_files= [Path(i) for i in grf_files]
+
+            # add to variable
+            self.grf_files = grf_files
+            grf_filenames = []
+            for itrial in self.grf_files:
+                grf_filenames.append(itrial.stem)
+
+            if ~len(grf_files) != self.nfiles:
+                print('warning found ' + len(grf_filenames) + ' grf files and ' + self.nfiles + ' mocap files')
+            #   2. search for each filename the most likely candidate
+            for file in self.filenames:
+                # search for all files with the same name
+                most_similar = difflib.get_close_matches(file, grf_filenames, n=1)
+                if most_similar:
+                    index_of_most_similar = grf_filenames.index(most_similar)
+                    grf_file_sel = grf_files[index_of_most_similar]
+                    self.matched_grfs.append(grf_file_sel)
+                else:
+                    print("no grf file found for " + file)
+                    self.matched_grfs.append('no grf file found')
+        else:
+            print('please use myobj.set_folder_grfdat before creating external loads files')
+
     # inverse dynamics using api
     def compute_inverse_dynamics(self, boolRead= True):
         # computes inverse dynamics for all ik files
@@ -609,6 +675,9 @@ class osim_subject:
         output_settings = os.path.join(self.id_directory, 'settings')
         if not os.path.isdir(output_settings):
             os.makedirs(output_settings)
+        # check if we add external loads
+        if self.folder_grfdat is not None:
+            self.match_marker_grf_files() #  creates a list with matching
         # solve inverse dynamics for this trial
         InverseDynamics(model_input=self.modelpath,
                         xml_input=self.general_id_settings,
@@ -616,7 +685,8 @@ class osim_subject:
                         mot_files=self.ikfiles,
                         sto_output=self.id_directory,
                         xml_forces=self.extload_settings,
-                        forces_dir=self.ext_loads_dir)
+                        forces_dir=self.ext_loads_dir,
+                        force_names= self.matched_grfs)
         # all idfiles assigned to this
         if boolRead:
             self.read_idfiles()
@@ -812,6 +882,15 @@ class osim_subject:
     def set_marker_dir(self, marker_dir):
         self.marker_dir = marker_dir
 
+    def set_folder_grfdat(self, folder):
+        self.folder_grfdat = folder
+
+    def set_momentarm_folder(self, folder):
+        self.moment_arm_folder = folder
+
+    def set_lmt_folder(self, folder):
+        self.lmt_folder = folder
+
 
     # set functions (not from chatgpt)
     #---------------
@@ -879,7 +958,7 @@ class osim_subject:
                 print('Problem with computing ball velocity ', Path(self.ikfiles[itrial]).stem)
                 itend = it0
 
-            # create externa loads file for soccer kick -- right leg
+            # create external loads file for soccer kick -- right leg
             nfr = len(df_ik.time)
             dat_ballFoot = np.zeros([nfr, 10])
             dat_ballFoot[:, 0] = df_ik.time
