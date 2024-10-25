@@ -127,11 +127,16 @@ subj.set_general_id_settings(general_id_settings)
 subj.compute_inverse_dynamics()
 
 # compute muscle-tendon lengths and moment arms using api
-tstart = 0.5 # start time (used for all motion files)
-tend = 5 # end time (used for all motion files)
+tstart = 10 # start time (used for all motion files)
+tend = 11 # end time (used for all motion files)
 subj.set_lmt_folder(lmt_folder)
 subj.compute_lmt(tstart = tstart, tend= tend)
 subj.set_momentarm_folder(dm_folder)
 subj.compute_dM(tstart = tstart, tend = tend)
+
+# test read an lmt and dM file
+lmt = pd.read_csv(os.path.join(lmt_folder, 'Refwalk_marker_lmt.csv'))
+dm = pd.read_csv(os.path.join(dm_folder, 'Refwalk_marker_dm.csv'))
+
 
 

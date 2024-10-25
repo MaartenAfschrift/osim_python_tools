@@ -71,6 +71,27 @@ class bodykinematics:
     def plot_results(self):
         print('ToDo')
 
+# compute muscle tendon lengths through the api
+class lmt_api():
+    def __init__(self, modelfile, ikfiles, outputdir,
+                 overwrite = False,
+                 tstart = None,
+                 tend = None):
+        self.modelpath = modelfile
+        self.outputdir = outputdir
+        self.ikfiles = ikfiles
+        self.overwrite = overwrite
+
+        if not isinstance(ikfiles, list):
+            self.ikfiles = [ikfiles]
+        else:
+            self.ikfiles = ikfiles
+
+        if not isinstance(self.ikfiles[0], Path):
+            self.ikfiles = [Path(i) for i in self.ikfiles]
+
+
+
 
 
 

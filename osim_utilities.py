@@ -337,6 +337,7 @@ class osim_subject:
         state_vars.setToZero()
         model.setStateVariableValues(s, state_vars)
         model.realizePosition(s)
+        forceSet = model.getForceSet()
 
         # read ik as time_series
         [columnLabels, table] = self.read_ik_as_timeseries(self.ikfiles[ifile])
@@ -350,9 +351,9 @@ class osim_subject:
 
         # select frames in time window
         if tstart is None:
-            tstart = t[0]
+            tstart = t.iloc[0]
         if tend is None:
-            tend = t[-1]
+            tend = t.iloc[-1]
         indices = np.where((t >= tstart) & (t <= tend))[0]
         # pre allocate output
         lMT = np.zeros((len(indices), self.nMuscles))
@@ -368,7 +369,7 @@ class osim_subject:
             model.realizePosition(s)
             # loop over muscles to get muscle-tendon length
             for m in range(0, self.nMuscles):
-                muscle_m = self.forceSet.get(self.muscle_names[m])
+                muscle_m = forceSet.get(self.muscle_names[m])
                 muscle_m = osim.Muscle.safeDownCast(muscle_m)
                 lMT[cti,m] = muscle_m.getLength(s)
             # update counter
@@ -454,6 +455,7 @@ class osim_subject:
         state_vars.setToZero()
         model.setStateVariableValues(s, state_vars)
         model.realizePosition(s)
+        forceset = model.getForceSet()
 
         # read ik as time_series
         [columnLabels, table] = self.read_ik_as_timeseries(self.ikfiles[ifile])
@@ -469,14 +471,14 @@ class osim_subject:
         self.dM_names = []
         for j in range(0, self.ncoord):
             for m in range(0, self.nMuscles):
-                muscle_m = self.forceSet.get(self.muscle_names[m])
+                muscle_m = forceset.get(self.muscle_names[m])
                 self.dM_names.append(muscle_m.getName() + '_' + model.getCoordinateSet().get(j).getName())
 
         # select frames in time window
         if tstart is None:
-            tstart = t[0]
+            tstart = t.iloc[0]
         if tend is None:
-            tend = t[-1]
+            tend = t.iloc[-1]
         indices = np.where((t >= tstart) & (t <= tend))[0]
         # pre allocate output
         dM = np.zeros((len(indices), self.nMuscles * self.ncoord))
@@ -490,20 +492,16 @@ class osim_subject:
                 state_vars.set(index, Qs[i, j])
             model.setStateVariableValues(s, state_vars)
             model.realizePosition(s)
-
             # get relevant muscles for this coordinate
             for j in range(0, self.ncoord):
                 # get relevant coordinates for this muscle
                 muscles_sel = self.dofs_dm[columnLabels[j]]
-
-                # loop over muscles to get muscle-tendon length
+                # loop over muscles to get the moment arm
                 for m in muscles_sel:
-                    muscle_m = self.forceSet.get(self.muscle_names[m])
+                    muscle_m = forceset.get(self.muscle_names[m])
                     muscle_m = osim.Muscle.safeDownCast(muscle_m)
                     # this step is computationally very expensive
                     dM[cti, m + j * self.nMuscles] = muscle_m.computeMomentArm(s, model.getCoordinateSet().get(j))
-                    if i == 0:
-                        self.dM_names.append(muscle_m.getName() + '_' + model.getCoordinateSet().get(j).getName())
             # print current stage per 500 processed frames
             if np.remainder(cti, 100) == 0:
                 print('computing moment arms: frame ' , i , '/' ,  nfr)
@@ -530,6 +528,7 @@ class osim_subject:
         state_vars.setToZero()
         model.setStateVariableValues(s, state_vars)
         model.realizePosition(s)
+        forceset = model.getForceSet()
 
         # get state variable names
         stateVariableNames = model.getStateVariableNames()
@@ -553,7 +552,7 @@ class osim_subject:
                 model.realizePosition(s)
                 # loop over muscles to get muscle-tendon length
                 for m in range(0, self.nMuscles):
-                    muscle_m = self.forceSet.get(self.muscle_names[m])
+                    muscle_m = forceset.get(self.muscle_names[m])
                     muscle_m = osim.Muscle.safeDownCast(muscle_m)
                     lmt[j, m] = muscle_m.getLength(s)
             # evaluate if moment arms changes for this change in dof
@@ -570,7 +569,7 @@ class osim_subject:
         self.lmt_dat = []
         for ifile in range(0, self.nfiles):
             # get muscle tendon lengths
-            lmt = self.get_LMT_ifile(ifile)
+            lmt = self.get_LMT_ifile(ifile, tstart = tstart, tend= tend)
 
             # print to a csv file -- lmt
             outpath =  self.lmt_folder

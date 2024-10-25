@@ -161,5 +161,7 @@ class InverseDynamics:
         # run inverse dynamics
         id_tool.run()
 
+        # print id tool settings ? [ToDo]
+
         #if self.forces_dir:
         #    temp_xml.unlink()  # delete temporary xml file
