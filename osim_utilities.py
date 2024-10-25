@@ -640,11 +640,12 @@ class osim_subject:
             grf_files = []
             for file in os.listdir(self.folder_grfdat):
                 # Check if the file ends with .mot
-                if file.endswith('.sto'):
+                if file.endswith('.mot'):
                     grf_files.append(os.path.join(self.folder_grfdat, file))
             # convert to Path objects
-            if not isinstance(grf_files[0], Path):
-                grf_files= [Path(i) for i in grf_files]
+            if len(grf_files)>0:
+                if not isinstance(grf_files[0], Path):
+                    grf_files= [Path(i) for i in grf_files]
 
             # add to variable
             self.grf_files = grf_files
@@ -652,14 +653,14 @@ class osim_subject:
             for itrial in self.grf_files:
                 grf_filenames.append(itrial.stem)
 
-            if ~len(grf_files) != self.nfiles:
-                print('warning found ' + len(grf_filenames) + ' grf files and ' + self.nfiles + ' mocap files')
+            if len(grf_files) != self.nfiles:
+                print('warning found ', len(grf_filenames), ' grf files and ', self.nfiles, ' mocap files')
             #   2. search for each filename the most likely candidate
             for file in self.filenames:
                 # search for all files with the same name
                 most_similar = difflib.get_close_matches(file, grf_filenames, n=1)
                 if most_similar:
-                    index_of_most_similar = grf_filenames.index(most_similar)
+                    index_of_most_similar = grf_filenames.index(most_similar[0])
                     grf_file_sel = grf_files[index_of_most_similar]
                     self.matched_grfs.append(grf_file_sel)
                 else:
@@ -685,7 +686,7 @@ class osim_subject:
                         mot_files=self.ikfiles,
                         sto_output=self.id_directory,
                         xml_forces=self.extload_settings,
-                        forces_dir=self.ext_loads_dir,
+                        forces_dir=self.folder_grfdat,
                         force_names= self.matched_grfs)
         # all idfiles assigned to this
         if boolRead:

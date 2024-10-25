@@ -152,9 +152,7 @@ class InverseDynamics:
                         f"{Path(self.forces_dir, trial.stem).resolve()}.sto"
                     )
             else: # assumes different names (setting force_names)
-                loads.setDataFileName(
-                    f"{Path(self.forces_dir, self.force_names[index_ftrial]).resolve()}.sto"
-                )
+                loads.setDataFileName(str(self.force_names[index_ftrial]))
 
             temp_xml = Path(os.path.join(self.forces_dir,trial.stem + '_extloads.xml'))
             loads.printToXML(f'{temp_xml.resolve()}')  # temporary xml file

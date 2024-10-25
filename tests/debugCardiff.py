@@ -25,17 +25,20 @@ mainpath = 'C:/Users/mat950/Documents/Data/Cardiff_Lonit/osimData_young'
 datapath = os.path.join(mainpath,'Patient2')
 model_path = os.path.join(datapath, 'model','scaled_model_marker.osim')
 trc_folder = os.path.join(datapath, 'RefWalk', 'data')
-trc_folder_filter = os.path.join(datapath, 'RefWalk', 'data_filt')
-grf_folder = os.path.join(datapath, 'RefWalk', 'data')
-ik_folder = os.path.join(datapath, 'RefWalk', 'ik_vx')
-id_folder = os.path.join(datapath, 'RefWalk', 'ID_vx')
-lmt_folder = os.path.join(datapath, 'RefWalk', 'lmt')
-dm_folder = os.path.join(datapath, 'RefWalk', 'dM')
+trc_folder_filter = os.path.join(datapath, 'RefWalk', 'data_debug')
+#grf_folder = os.path.join(datapath, 'RefWalk', 'data')
+grf_folder = trc_folder_filter
+ik_folder = os.path.join(datapath, 'RefWalk', 'ik_debug')
+id_folder = os.path.join(datapath, 'RefWalk', 'ID_debug')
+lmt_folder = os.path.join(datapath, 'RefWalk', 'lmt_debug')
+dm_folder = os.path.join(datapath, 'RefWalk', 'dM_debug')
 general_ik_settings = os.path.join(mainpath, 'osim_settings','IK_settings.xml')
 general_id_settings = os.path.join(mainpath, 'osim_settings','ID_settings.xml')
 loads_settings = os.path.join(mainpath, 'osim_settings','loads_settings.xml')
 
 
+t_start_window = 10
+t_end_window = 12
 
 #-----------------------------------------------
 # ---          Filter trc file
@@ -60,15 +63,18 @@ for msel in trc['marker_names']:
     dat[imissing,:] = np.nan
     trc['markers'][msel] = signal.filtfilt(b, a, dat.T).T
 
+# select frames in time window
+isel = np.where((time>=t_start_window) & (time<=t_end_window))[0]
+
 # write trc file
-nfr = len(time)
+nfr = len(time[isel])
 trcfile = TRCFile(data_rate=camera_rate, camera_rate=camera_rate, num_frames=nfr, num_markers=0, units='m',
-              orig_data_rate=camera_rate, orig_data_start_frame=1, orig_num_frames=nfr, time=time)
+              orig_data_rate=camera_rate, orig_data_start_frame=1, orig_num_frames=nfr, time=time[isel])
 # add markers
 for msel in trc['marker_names']:
     # add marker to trc object
     marker = trc['markers'][msel]
-    trcfile.add_marker(msel, marker[:,0], marker[:,1], marker[:,2])
+    trcfile.add_marker(msel, marker[isel,0], marker[isel,1], marker[isel,2])
 
 # write trc file
 if not os.path.exists(trc_folder_filter):
@@ -88,8 +94,11 @@ for lab in labels:
     if lab!= 'time':
         grf[lab] = signal.filtfilt(b,a, grf[lab])
 
-WriteMotionFile(grf.to_numpy(), labels, os.path.join(trc_folder_filter,'Refwalk_GRF.mot'))
+alldata = grf.to_numpy()
+time =alldata[:,0]
+isel = np.where((time>=t_start_window) & (time<=t_end_window))[0]
 
+WriteMotionFile(alldata[isel,:], labels, os.path.join(trc_folder_filter,'Refwalk_GRF.mot'))
 
 
 
@@ -111,7 +120,7 @@ subj.set_general_ik_settings(general_ik_settings)
 subj.compute_inverse_kinematics(overwrite= False)
 
 # run inverse dynamics
-subj.set_generic_external_loads(loads_settings)
+subj.set_generic_external_loads(loads_settings )
 subj.set_folder_grfdat(grf_folder)
 subj.set_id_directory(id_folder)
 subj.set_general_id_settings(general_id_settings)
