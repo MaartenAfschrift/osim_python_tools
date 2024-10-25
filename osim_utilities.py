@@ -1046,7 +1046,7 @@ def osim_body_I(Inertia):
     I_body[1, 2]= I_osim_Prod.get(2)
     return(I_body)
 
-def generate_mot_file(data_matrix, colnames, filename):
+def WriteMotionFile(data_matrix, colnames, filename):
     datarows, datacols = data_matrix.shape
     time = data_matrix[:, 0]
     range_values = [time[0], time[-1]]

@@ -2,7 +2,7 @@
 #---------------------------------------
 
 # import utilities
-from osim_utilities import osim_subject, readMotionFile
+from osim_utilities import osim_subject, readMotionFile, WriteMotionFile
 import os
 import matplotlib.pyplot as plt
 import matplotlib
@@ -15,6 +15,8 @@ from inverse_kinematics import InverseKinematics
 from kinematic_analyses import bodykinematics
 from scipy import signal
 import scipy.interpolate as interpolate
+from utilsTRC import TRCFile, trc_2_dict
+from scipy import signal
 
 matplotlib.use('Qt5Agg') # interactive backend for matplotlib figures
 
@@ -23,8 +25,9 @@ mainpath = 'C:/Users/mat950/Documents/Data/Cardiff_Lonit/osimData_young'
 datapath = os.path.join(mainpath,'Patient2')
 model_path = os.path.join(datapath, 'model','scaled_model_marker.osim')
 trc_folder = os.path.join(datapath, 'RefWalk', 'data')
+trc_folder_filter = os.path.join(datapath, 'RefWalk', 'data_filt')
 grf_folder = os.path.join(datapath, 'RefWalk', 'data')
-ik_folder = os.path.join(datapath, ' RefWalk', 'ik_vx')
+ik_folder = os.path.join(datapath, 'RefWalk', 'ik_vx')
 id_folder = os.path.join(datapath, 'RefWalk', 'ID_vx')
 lmt_folder = os.path.join(datapath, 'RefWalk', 'lmt')
 dm_folder = os.path.join(datapath, 'RefWalk', 'dM')
@@ -32,11 +35,72 @@ general_ik_settings = os.path.join(mainpath, 'osim_settings','IK_settings.xml')
 general_id_settings = os.path.join(mainpath, 'osim_settings','ID_settings.xml')
 loads_settings = os.path.join(mainpath, 'osim_settings','loads_settings.xml')
 
+
+
+#-----------------------------------------------
+# ---          Filter trc file
+#----------------------------------------------
+# adapt trc file
+trc = trc_2_dict(os.path.join(trc_folder,'Refwalk_marker.trc'), rotation=None)
+
+# there is a problem in the original trc files when t>=100s. It seems that it writes 100.005s as 100.01
+time = trc['time']
+isel = np.where(np.diff(time) == 0)
+time[isel] = time[isel]-0.005
+
+# low pass filter markers
+camera_rate = np.round(1./np.nanmean(np.diff(time)))
+order = 2
+cutoff = 6 / (camera_rate*0.5)
+b, a = signal.butter(order, cutoff, btype='low')
+for msel in trc['marker_names']:
+    dat = trc['markers'][msel]
+    trc['markers'][msel] = signal.filtfilt(b, a, dat.T).T
+
+# write trc file
+nfr = len(time)
+trcfile = TRCFile(data_rate=camera_rate, camera_rate=camera_rate, num_frames=nfr, num_markers=0, units='m',
+              orig_data_rate=camera_rate, orig_data_start_frame=1, orig_num_frames=nfr, time=time)
+# add markers
+for msel in trc['marker_names']:
+    # add marker to trc object
+    marker = trc['markers'][msel]
+    trcfile.add_marker(msel, marker[:,0], marker[:,1], marker[:,2])
+
+# write trc file
+if not os.path.exists(trc_folder_filter):
+    os.makedirs(trc_folder_filter)
+trcfile.write(os.path.join(trc_folder_filter, 'Refwalk_marker.trc'))
+
+#-----------------------------------------------
+# ---          Filter grf file
+#----------------------------------------------
+grf = readMotionFile(os.path.join(trc_folder,'Refwalk_GRF.mot'))
+sf = np.round(1/np.mean(np.diff(grf.time)))
+labels = grf.columns
+cutoff = 6/(sf*0.5)
+order = 2
+b, a = signal.butter(order, cutoff, btype='low')
+for lab in labels:
+    if lab!= 'time':
+        grf[lab] = signal.filtfilt(b,a, grf[lab])
+
+WriteMotionFile(grf.to_numpy(), labels, os.path.join(trc_folder_filter,'Refwalk_GRF.mot'))
+
+
+
+
+
+#-----------------------------------------------
+# ---           Batch processing
+#----------------------------------------------
+
+
 # create object for processing
 subj = osim_subject(model_path)
 
 # set all the trc files
-subj.set_trcfiles_fromfolder(trc_folder)
+subj.set_trcfiles_fromfolder(trc_folder_filter)
 
 # run inverse kinematics
 subj.set_ik_directory(ik_folder)
@@ -55,10 +119,5 @@ subj.set_lmt_folder(lmt_folder)
 subj.compute_lmt(tstart = tstart, tend= tend)
 subj.set_momentarm_folder(dm_folder)
 subj.compute_dM(tstart = tstart, tend = tend)
-
-# notes for Lonit:
-# you can use utilsTRC to adapt the trc file
-# you can use readMotionFile and generate_mot_file to read and write the grf file
-
 
 
