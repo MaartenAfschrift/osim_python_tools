@@ -55,6 +55,9 @@ cutoff = 6 / (camera_rate*0.5)
 b, a = signal.butter(order, cutoff, btype='low')
 for msel in trc['marker_names']:
     dat = trc['markers'][msel]
+    # older problem with if marker is missing = 0, now should be nan
+    imissing = np.where(dat[:, 0] == 0)[0]
+    dat[imissing,:] = np.nan
     trc['markers'][msel] = signal.filtfilt(b, a, dat.T).T
 
 # write trc file
