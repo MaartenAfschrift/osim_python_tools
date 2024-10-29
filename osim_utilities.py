@@ -1,15 +1,12 @@
-import glob
+
 import os
 from pathlib import Path
 import opensim as osim
 import numpy as np
-import matplotlib.pyplot as plt
 import pandas as pd
 from inverse_dynamics import InverseDynamics
 from inverse_kinematics import InverseKinematics
 from kinematic_analyses import bodykinematics
-from scipy import signal
-import scipy.interpolate as interpolate
 import difflib
 
 def readMotionFile(filename):
@@ -969,7 +966,7 @@ class osim_subject:
             dat_headers = ['time', 'ball_force_vx', 'ball_force_vy', 'ball_force_vz', 'ball_force_px', 'ball_force_py',
                            'ball_force_pz', 'ground_torque_x', 'ground_torque_y', 'ground_torque_z']
             forcesfilename = os.path.join(self.ext_loads_dir, Path(self.ikfiles[itrial]).stem + '.sto')
-            generate_mot_file(dat_ballFoot, dat_headers, forcesfilename)
+            WriteMotionFile(dat_ballFoot, dat_headers, forcesfilename)
             self.extload_files.append(forcesfilename)
 
     # various functions for specific projects
