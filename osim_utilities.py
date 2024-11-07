@@ -6,62 +6,11 @@ import numpy as np
 import pandas as pd
 from inverse_dynamics import InverseDynamics
 from inverse_kinematics import InverseKinematics
-from kinematic_analyses import bodykinematics
+from kinematic_analyses import bodykinematics, lmt_api, moment_arm_api
+from general_utilities import readMotionFile, WriteMotionFile
 import difflib
 
-def readMotionFile(filename):
-    """ Reads OpenSim .mot and .sto files.
-    Parameters
-    ----------
-    filename: absolute path to the .sto file
-    Returns
-    -------
-    header: the header of the .sto
-    labels: the labels of the columns
-    data: an array of the data
-    """
 
-    if not os.path.exists(filename):
-        print('file do not exists')
-
-    file_id = open(filename, 'r')
-
-    # read header
-    next_line = file_id.readline()
-    header = [next_line]
-    nc = 0
-    nr = 0
-    while not 'endheader' in next_line:
-        if 'datacolumns' in next_line:
-            nc = int(next_line[next_line.index(' ') + 1:len(next_line)])
-        elif 'datarows' in next_line:
-            nr = int(next_line[next_line.index(' ') + 1:len(next_line)])
-        elif 'nColumns' in next_line:
-            nc = int(next_line[next_line.index('=') + 1:len(next_line)])
-        elif 'nRows' in next_line:
-            nr = int(next_line[next_line.index('=') + 1:len(next_line)])
-
-        next_line = file_id.readline()
-        header.append(next_line)
-
-    # process column labels
-    next_line = file_id.readline()
-    if next_line.isspace() == True:
-        next_line = file_id.readline()
-
-    labels = next_line.split()
-
-    # get data
-    data = np.full((nr, len(labels)), np.nan)
-    for i in range(1, nr + 1):
-        d = [float(x) for x in file_id.readline().split()]
-        if len(d) == nc:
-            data[i-1,:] = d
-
-    file_id.close()
-    dat = pd.DataFrame(data, columns = labels)
-
-    return dat
 
 # general class to do batch processing in opensim
 # This class contains all information for a subject.
@@ -266,8 +215,6 @@ class osim_subject:
             ik_file = Path(os.path.join(self.ik_directory, self.filenames[itrial] + '.mot'))
             ik_data = self.read_ik(ik_file)
             self.ikdat.append(ik_data)
-        # also update list with ik files
-        self.set_ikfiles_fromfolder(self.ik_directory)
 
     def read_ik(self, ik_file):
         if ik_file.exists():
@@ -315,268 +262,16 @@ class osim_subject:
                 self.id_dat.append(id_dat)
 
 
-    # ----------------------------
-    #           Computations
-    #------------------------------
-
-    def get_LMT_ifile(self, ifile, tstart = None, tend = None):
-
-        # get time vector and number of frames.
-        t = self.ikdat[ifile].time
-        nfr = len(t)
-
-        # init state of model
-        model = osim.Model(self.modelpath)
-        model.initSystem()
-        s = model.initSystem()
-        state_vars = model.getStateVariableValues(s)
-        force_set = model.getMuscles()
-        state_vars.setToZero()
-        model.setStateVariableValues(s, state_vars)
-        model.realizePosition(s)
-        forceSet = model.getForceSet()
-
-        # read ik as time_series
-        [columnLabels, table] = self.read_ik_as_timeseries(self.ikfiles[ifile])
-        Qs = table.getMatrix().to_numpy()
-
-        # get state variable names
-        stateVariableNames = model.getStateVariableNames()
-        stateVariableNamesStr = [
-            stateVariableNames.get(i) for i in range(
-                stateVariableNames.getSize())]
-
-        # select frames in time window
-        if tstart is None:
-            tstart = t.iloc[0]
-        if tend is None:
-            tend = t.iloc[-1]
-        indices = np.where((t >= tstart) & (t <= tend))[0]
-        # pre allocate output
-        lMT = np.zeros((len(indices), self.nMuscles))
-
-        # loop over all frames
-        cti = 0
-        for i in indices:
-            # set state from current frame
-            for j in range(0, len(columnLabels)):
-                index = stateVariableNamesStr.index(columnLabels[j])
-                state_vars.set(index, Qs[i,j])
-            model.setStateVariableValues(s, state_vars)
-            model.realizePosition(s)
-            # loop over muscles to get muscle-tendon length
-            for m in range(0, self.nMuscles):
-                muscle_m = forceSet.get(self.muscle_names[m])
-                muscle_m = osim.Muscle.safeDownCast(muscle_m)
-                lMT[cti,m] = muscle_m.getLength(s)
-            # update counter
-            cti = cti +1
-
-        # return lmt as a dataframe
-        data = np.concatenate(
-            (np.expand_dims(t[indices], axis=1), lMT), axis=1)
-        columns = ['time'] + self.muscle_names
-        muscle_tendon_lengths = pd.DataFrame(data=data, columns=columns)
-
-        return muscle_tendon_lengths
-
-    def get_dM_ifile(self, ifile):
-
-        # get time vector and number of frames.
-        t = self.ikdat[ifile].time
-        nfr = len(t)
-
-        # pre allocate output
-        dM = np.zeros((nfr, self.nMuscles * self.ncoord))
-
-        # init state of model
-        model = osim.Model(self.modelpath)
-        s = model.initSystem()
-        state_vars = model.getStateVariableValues(s)
-        force_set = model.getMuscles()
-        state_vars.setToZero()
-        model.setStateVariableValues(s, state_vars)
-        model.realizePosition(s)
-
-        # read ik as time_series
-        [columnLabels, table] = self.read_ik_as_timeseries(self.ikfiles[ifile])
-        Qs = table.getMatrix().to_numpy()
-
-        # get state variable names
-        stateVariableNames = model.getStateVariableNames()
-        stateVariableNamesStr = [
-            stateVariableNames.get(i) for i in range(
-                stateVariableNames.getSize())]
-
-        # loop over all frames
-        self.dM_names = []
-        for i in range(0, nfr):
-            # set state from current frame
-            for j in range(0, len(columnLabels)):
-                index = stateVariableNamesStr.index(columnLabels[j])
-                state_vars.set(index, Qs[i, j])
-            model.setStateVariableValues(s, state_vars)
-            model.realizePosition(s)
-            # loop over muscles to get muscle-tendon length
-            for m in range(0, self.nMuscles):
-                muscle_m = self.forceSet.get(self.muscle_names[m])
-                muscle_m = osim.Muscle.safeDownCast(muscle_m)
-                for j in range(0, self.ncoord):
-                    # this step is computationally very expensive
-                    dM[i, m + j * self.nMuscles] = muscle_m.computeMomentArm(s, model.getCoordinateSet().get(j))
-                    if i == 0:
-                        self.dM_names.append(muscle_m.getName() + '_' + model.getCoordinateSet().get(j).getName())
-            # print current stage per 500 processed frames
-            if np.remainder(i, 100) == 0:
-                print('computing moment arms: frame ' , i , '/' ,  nfr)
-
-        # return lmt as a dataframe
-        data = np.concatenate(
-            (np.expand_dims(t, axis=1), dM), axis=1)
-        columns = ['time'] + self.dM_names
-        moment_arms = pd.DataFrame(data=data, columns=columns)
-
-        return moment_arms
-
-    def get_dM_ifile_fast(self, ifile, tstart = None, tend = None):
-
-        # get time vector and number of frames.
-        t = self.ikdat[ifile].time
-        nfr = len(t)
-
-        # init state of model
-        model = osim.Model(self.modelpath)
-        s = model.initSystem()
-        state_vars = model.getStateVariableValues(s)
-        force_set = model.getMuscles()
-        state_vars.setToZero()
-        model.setStateVariableValues(s, state_vars)
-        model.realizePosition(s)
-        forceset = model.getForceSet()
-
-        # read ik as time_series
-        [columnLabels, table] = self.read_ik_as_timeseries(self.ikfiles[ifile])
-        Qs = table.getMatrix().to_numpy()
-
-        # get state variable names
-        stateVariableNames = model.getStateVariableNames()
-        stateVariableNamesStr = [
-            stateVariableNames.get(i) for i in range(
-                stateVariableNames.getSize())]
-
-        # get all headers
-        self.dM_names = []
-        for j in range(0, self.ncoord):
-            for m in range(0, self.nMuscles):
-                muscle_m = forceset.get(self.muscle_names[m])
-                self.dM_names.append(muscle_m.getName() + '_' + model.getCoordinateSet().get(j).getName())
-
-        # select frames in time window
-        if tstart is None:
-            tstart = t.iloc[0]
-        if tend is None:
-            tend = t.iloc[-1]
-        indices = np.where((t >= tstart) & (t <= tend))[0]
-        # pre allocate output
-        dM = np.zeros((len(indices), self.nMuscles * self.ncoord))
-
-        # loop over all frames
-        cti = 0
-        for i in indices:
-            # set state from current frame
-            for j in range(0, len(columnLabels)):
-                index = stateVariableNamesStr.index(columnLabels[j])
-                state_vars.set(index, Qs[i, j])
-            model.setStateVariableValues(s, state_vars)
-            model.realizePosition(s)
-            # get relevant muscles for this coordinate
-            for j in range(0, self.ncoord):
-                # get relevant coordinates for this muscle
-                muscles_sel = self.dofs_dm[columnLabels[j]]
-                # loop over muscles to get the moment arm
-                for m in muscles_sel:
-                    muscle_m = forceset.get(self.muscle_names[m])
-                    muscle_m = osim.Muscle.safeDownCast(muscle_m)
-                    # this step is computationally very expensive
-                    dM[cti, m + j * self.nMuscles] = muscle_m.computeMomentArm(s, model.getCoordinateSet().get(j))
-            # print current stage per 500 processed frames
-            if np.remainder(cti, 100) == 0:
-                print('computing moment arms: frame ' , i , '/' ,  nfr)
-            # update counter
-            cti = cti+1
-
-        # return moment arms as a dataframe
-        data = np.concatenate(
-            (np.expand_dims(t[indices], axis=1), dM), axis=1)
-        columns = ['time'] + self.dM_names
-        moment_arms = pd.DataFrame(data=data, columns=columns)
-
-        return moment_arms
-
-    # computing moment arms for a model is very slow because we always compute the moment arms of a particular muscle
-    # for all dofs (e.g. we evaluate moment arm of soleus round shoulder joint). We can reduce computation time by first
-    # identifying the relevant dofs for each muscle
-    def identify_relevant_dofs_dM(self):
-        # init state of model
-        model = osim.Model(self.modelpath)
-        s = model.initSystem()
-        state_vars = model.getStateVariableValues(s)
-        force_set = model.getMuscles()
-        state_vars.setToZero()
-        model.setStateVariableValues(s, state_vars)
-        model.realizePosition(s)
-        forceset = model.getForceSet()
-
-        # get state variable names
-        stateVariableNames = model.getStateVariableNames()
-        stateVariableNamesStr = [
-            stateVariableNames.get(i) for i in range(
-                stateVariableNames.getSize())]
-
-        # random states
-        [columnLabels, table] = self.read_ik_as_timeseries(self.ikfiles[0])
-        #Qs = np.random.rand(50, len(columnLabels)) - 0.5
-
-        # loop over dofs
-        self.dofs_dm = {}
-        for i in range(0, len(columnLabels)):
-            xvar = np.array([-0.5, 0, 0.5])         # vary states
-            index = stateVariableNamesStr.index(columnLabels[i])
-            lmt = np.zeros((len(xvar), self.nMuscles))
-            for j in range(0, len(xvar)):
-                state_vars.set(index, xvar[j])
-                model.setStateVariableValues(s, state_vars)
-                model.realizePosition(s)
-                # loop over muscles to get muscle-tendon length
-                for m in range(0, self.nMuscles):
-                    muscle_m = forceset.get(self.muscle_names[m])
-                    muscle_m = osim.Muscle.safeDownCast(muscle_m)
-                    lmt[j, m] = muscle_m.getLength(s)
-            # evaluate if moment arms changes for this change in dof
-            d_lmt = np.min(lmt, axis = 0) - np.max(lmt, axis = 0)
-            index_muscles = np.where(np.abs(d_lmt)>0.0001)
-            self.dofs_dm[columnLabels[i]] = index_muscles[0]
-
     def compute_lmt(self, boolprint = True, tstart = None, tend = None):
+
         # read all ik file if needed
         if len(self.ikdat) == 0:
             self.read_ikfiles()
 
-        # compute for each ik file the muscle tendon lengths
-        self.lmt_dat = []
-        for ifile in range(0, self.nfiles):
-            # get muscle tendon lengths
-            lmt = self.get_LMT_ifile(ifile, tstart = tstart, tend= tend)
+        # use lmt_api class to compute lmt in all ikfiles
+        lmtobj = lmt_api(self.modelpath, self.ikfiles, self.lmt_folder, ikdat = self.ikdat)
+        self.lmt_dat = lmtobj.compute_lmt(tstart = tstart, tend = tend)
 
-            # print to a csv file -- lmt
-            outpath =  self.lmt_folder
-            if not os.path.exists(outpath ):
-                os.makedirs(outpath)
-            trialname = f'{self.ikfiles[ifile].stem}'
-            outfile = os.path.join(outpath, trialname + '_lmt.csv')
-            if boolprint:
-                lmt.to_csv(outfile)
-            self.lmt_dat.append(lmt)
 
     def compute_dM(self, boolprint = True, fastversion = True,
                    tstart = None, tend = None):
@@ -584,28 +279,11 @@ class osim_subject:
         if len(self.ikdat) == 0:
             self.read_ikfiles()
 
-        # find relevant dofs for each muscle in fast version
-        if fastversion:
-            self.identify_relevant_dofs_dM()
+        # use dm_api class to compute dM in all ikfiles
+        dmobj = moment_arm_api(self.modelpath, self.ikfiles, self.moment_arm_folder,
+                               ikdat = self.ikdat)
+        self.dm_dat = dmobj.compute_dm(tstart = tstart, tend = tend)
 
-        # compute for each ik file the muscle tendon lengths
-        self.dm_dat = []
-        for ifile in range(0, self.nfiles):
-            # get moment arms
-            if fastversion:
-                moment_arm = self.get_dM_ifile_fast(ifile, tstart = tstart, tend = tend)
-            else:
-                moment_arm = self.get_dM_ifile(ifile)
-
-            # print to a csv file -- lmt
-            outpath =  self.moment_arm_folder
-            if not os.path.exists(outpath ):
-                os.makedirs(outpath)
-            trialname = f'{self.ikfiles[ifile].stem}'
-            outfile = os.path.join(outpath, trialname + '_dM.csv')
-            if boolprint:
-                moment_arm.to_csv(outfile)
-            self.dm_dat.append(moment_arm)
 
     # inverse kinematics using api
     def compute_inverse_kinematics(self, boolRead = True, overwrite = False):
@@ -1043,31 +721,6 @@ def osim_body_I(Inertia):
     I_body[1, 2]= I_osim_Prod.get(2)
     return(I_body)
 
-def WriteMotionFile(data_matrix, colnames, filename):
-    datarows, datacols = data_matrix.shape
-    time = data_matrix[:, 0]
-    range_values = [time[0], time[-1]]
 
-    if len(colnames) != datacols:
-        raise ValueError(f'Number of column names ({len(colnames)}) does not match the number of columns in the data ({datacols})')
-
-    # Open the file for writing
-    try:
-        with open(filename, 'w') as fid:
-            # Write MOT file header
-            fid.write(f'{filename}\nnRows={datarows}\nnColumns={datacols}\n\n')
-            fid.write(f'name {filename}\ndatacolumns {datacols}\ndatarows {datarows}\nrange {range_values[0]} {range_values[1]}\nendheader\n')
-
-            # Write column names
-            cols = '\t'.join(colnames) + '\n'
-            fid.write(cols)
-
-            # Write data
-            for i in range(datarows):
-                row = '\t'.join([f'{value:20.10f}' for value in data_matrix[i, :]]) + '\n'
-                fid.write(row)
-
-    except IOError:
-        print(f'\nERROR: {filename} could not be opened for writing...\n')
 
 

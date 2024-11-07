@@ -24,11 +24,8 @@ ikfile = os.path.join(datapath, 'KS', 'KS_Refwalk.mot')
 my_subject.set_ikfiles(ikfile)
 my_subject.read_ikfiles()
 
-# test identify relevant dofs
-my_subject.identify_relevant_dofs_dM()
-
 # test compute muscle tendon lengths
-#my_subject.compute_lmt()
-my_subject.compute_dM()
+my_subject.compute_lmt(tstart = 10, tend = 20)
+my_subject.compute_dM(tstart = 10, tend = 20)
 
 print('test')

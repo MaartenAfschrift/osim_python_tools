@@ -2,7 +2,8 @@
 #---------------------------------------
 
 # import utilities
-from osim_utilities import osim_subject, readMotionFile, WriteMotionFile
+from osim_utilities import osim_subject
+from general_utilities import readMotionFile, WriteMotionFile
 import os
 import matplotlib.pyplot as plt
 import matplotlib
@@ -119,6 +120,7 @@ subj.compute_inverse_dynamics()
 
 # compute muscle-tendon lengths and moment arms using api
 # instead of muscle analysis (this is slow)
+# set time window for analysis
 tstart = 0.5 # start time (used for all motion files)
 tend = 5 # end time (used for all motion files)
 subj.set_lmt_folder(lmt_folder)
