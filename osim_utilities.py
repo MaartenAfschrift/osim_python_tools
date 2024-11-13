@@ -121,7 +121,7 @@ class osim_subject:
         trc_files = []
         for file in os.listdir(trc_folder):
             # Check if the file ends with .mot
-            if file.endswith('.trc'):
+            if file.endswith('.trc') and not(file.startswith('._')):
                 trc_files.append(os.path.join(trc_folder, file))
         # convert to Path objects
         if not isinstance(trc_files[0], Path):
@@ -163,7 +163,7 @@ class osim_subject:
         ik_files = []
         for file in os.listdir(ikfolder):
             # Check if the file ends with .mot
-            if file.endswith('.mot'):
+            if file.endswith('.mot') and not(file.startswith('._')):
                 ik_files.append(os.path.join(ikfolder, file))
         # convert to Path objects
         if not isinstance(ik_files[0], Path):
