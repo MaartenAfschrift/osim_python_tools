@@ -78,6 +78,41 @@ subj.compute_dM()
 
 Note that implementations uses by default the fast version to compute the moment arms. In this fast version I first identify the dofs spanned by each muscle and only evaluate the moment arm for those dofs.
 
+### DeGroote2016 muscle model
 
+This repository also contains a class to compute muscle dynamics as in DeGroote2016. It is implemented with normalised fiber length as a state and you can use it in both implicit and explicit formulations. 
+
+example to create muscle object
+
+```python
+FMo = 1000 # maximal isometric force in N
+lMo = 0.2 # optimal fiber length in m
+lTs = 0.5 # tendon slack length in m
+alpha = 0.1 # optimal pennation angle in rad
+vMtildemax = 10 # maximal muscle fiber velocity in lMo/s
+kT = 35 # F/L propeties tendon
+muscle = DeGrooteMuscle(FMo, lMo, lTs, alpha, vMtildemax, kT)
+```
+
+example explicit formulation contraction dynamics
+
+```python
+muscle.set_activation(0.1)
+muscle.set_norm_fiber_length(1)
+muscle.set_muscle_tendon_length(0.7)
+lmtilde_dot = muscle.get_norm_fiber_length_dot()
+```
+
+example implicit formulation
+
+```python
+muscle.set_activation(0.1)
+muscle.set_norm_fiber_length(1)
+muscle.set_muscle_tendon_length(0.7)
+muscle.set_norm_fiber_length_dot(lmtilde_dot)
+#muscle.set_norm_fiber_velocity(lmtilde_dot/muscle.maximal_fiber_velocity)
+hill_err = muscle.get_hill_equilibrium()
+print(hill_err)
+```
 
 
