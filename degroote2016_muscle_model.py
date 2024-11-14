@@ -9,6 +9,9 @@ import matplotlib.pyplot as plt
 
 # to do: add damping in parallel with the muscle in implicit implementation ? (not possible in explicit implementation)
 
+
+
+
 class DeGrooteMuscle:
 
     # init class
@@ -65,29 +68,49 @@ class DeGrooteMuscle:
     def set_norm_fiber_velocity(self, vmtilde):
         self.norm_fiber_velocity = vmtilde
 
+    # static methods for this class
+    @staticmethod
+    def force_velocity(norm_fiber_velocity):
+        # Equation S4:
+        d1 = -0.318
+        d2 = -8.149
+        d3 = -0.374
+        d4 = 0.886
+        velocity_force = d1 * np.log(d2 * norm_fiber_velocity + d3 +
+                                     np.sqrt((d2 * norm_fiber_velocity + d3) ** 2 + 1)) + d4
+
+        return velocity_force
+
+    @staticmethod
+    def inverse_force_velocity(velocity_force):
+        # Equation S13:
+        d1 = -0.318
+        d2 = -8.149
+        d3 = -0.374
+        d4 = 0.886
+        norm_fiber_velocity = (np.sinh((velocity_force - d4) / d1) - d3) / d2
+        return norm_fiber_velocity
 
 
-    ## Get functions
-    def get_fiber_length(self):
+
+    ## Computations
+    def compute_fiber_length(self):
         # 'denormalizing lMtilde'
         self.fiber_length = self.norm_fiber_length * self.optimal_fiber_length
-        return self.fiber_length
 
-    def get_tendon_length(self):
-        self.get_fiber_length()
+    def compute_tendon_length(self):
+        self.compute_fiber_length()
         # Based on equation S23:
         self.fiber_width = self.optimal_fiber_length * np.sin(self.optimal_pennation_angle)
         self.tendon_length = self.mtLength - np.sqrt((self.fiber_length ** 2 - self.fiber_width ** 2))
-        return self.tendon_length
 
-    def get_norm_tendon_length(self):
-        self.get_tendon_length()
+    def compute_norm_tendon_length(self):
+        self.compute_tendon_length()
 
         # 'normalizing lT'
         self.norm_tendon_length = self.tendon_length / self.tendon_slack_length
-        return self.norm_tendon_length
 
-    def get_tendon_shift(self):
+    def compute_tendon_shift(self):
         generic_tendon_compliance = 35
         generic_tendon_shift = 0
         reference_norm_tendon_length = 1
@@ -105,11 +128,9 @@ class DeGrooteMuscle:
         # compute shift to have equal force at reference length
         self.tendon_shift = reference_norm_tendon_force - adjusted_norm_tendon_force
 
-        return self.tendon_shift
-
-    def get_tendon_force(self):
-        self.get_norm_tendon_length()
-        self.get_tendon_shift()
+    def compute_tendon_force(self):
+        self.compute_norm_tendon_length()
+        self.compute_tendon_shift()
 
         # 'evaluating eqs. S18, 3, and S19'
         c1 = 0.200
@@ -119,12 +140,11 @@ class DeGrooteMuscle:
         ft = c1 * np.exp(self.kT * (self.norm_tendon_length - c2)) - c3 + self.tendon_shift
         # Equation 3
         self.tendon_force = self.maximal_isometric_force * ft
-        return self.tendon_force
 
-    def get_fiber_force(self):
-        self.get_fiber_length()
-        self.get_tendon_length()
-        self.get_tendon_force()
+    def compute_fiber_force(self):
+        self.compute_fiber_length()
+        self.compute_tendon_length()
+        self.compute_tendon_force()
 
         # 'evaluating eqs. S18, 3, and S19
         # Equation S18:
@@ -133,20 +153,18 @@ class DeGrooteMuscle:
         self.fiber_force = self.tendon_force / cos_alpha
         return self.fiber_force
 
-    def get_norm_fiber_force(self):
-        self.get_fiber_force()
+    def compute_norm_fiber_force(self):
+        self.compute_fiber_force()
 
         # 'normalizing FM'
         self.norm_fiber_force = self.fiber_force / self.maximal_isometric_force
-        return self.norm_fiber_force
 
-    def get_passive_fiber_force(self):
+    def compute_passive_fiber_force(self):
         # Equation S3:
         t5 = np.exp(self.kpe * (self.norm_fiber_length - 0.10e1) / self.e0)
         self.passive_fiber_force = ((t5 - 0.10e1) + 0.995172050006169) / 53.598150033144236
-        return self.passive_fiber_force
 
-    def get_active_fiber_force(self):
+    def compute_force_length(self):
         # Equation S2: (force-length contractile element ?)
         b1i = np.array([0.815, 0.433, 0.100])
         b2i = np.array([1.055, 0.717, 1.000])
@@ -161,59 +179,56 @@ class DeGrooteMuscle:
             fact += fact_tmp
 
         self.active_fiber_force = fact
-
         self.active_fiber_force_denorm = fact * self.activation * self.maximal_isometric_force
         return self.active_fiber_force, self.active_fiber_force_denorm
 
-    def get_norm_fiber_velocity(self):
-        self.get_passive_fiber_force()
-        self.get_active_fiber_force()
-        self.get_norm_fiber_force()
+    def compute_norm_fiber_velocity(self):
+        self.compute_passive_fiber_force()
+        self.compute_force_length()
+        self.compute_norm_fiber_force()
 
         # 'evaluating eqs. S14, S13, and S21'
         # Equation S14:
-        fm_vtilde = (self.norm_fiber_force - self.passive_fiber_force) / (self.activation * self.active_fiber_force)
-
-        # Equation S13:
-        d1 = -0.318
-        d2 = -8.149
-        d4 = 0.886
-        self.norm_fiber_velocity = np.sinh((fm_vtilde - d4) / d1) / d2
-        return self.norm_fiber_velocity
-
-    def get_norm_fiber_length_dot(self):
-        self.get_norm_fiber_velocity()
-
-        # Equation S21:
-        self.norm_fiber_length_dot = self.maximal_fiber_velocity / self.optimal_fiber_length * self.norm_fiber_velocity
-        return self.norm_fiber_length_dot
+        fm_vtilde = ((self.norm_fiber_force - self.passive_fiber_force) /
+                     (self.activation * self.active_fiber_force))
+        self.norm_fiber_velocity = self.inverse_force_velocity(fm_vtilde)
 
     ## Implicit formulation (formulation 4 of DeGroote2016)
 
-    def get_velocity_force(self):
+
+    def compute_velocity_force(self):
         # Equation S4:
-        d1 = -0.318
-        d2 = -8.149
-        d3 = -0.374
-        d4 = 0.886
-        self.velocity_force = d1 * np.log(d2*self.norm_fiber_velocity + d3 +
-                                          np.sqrt((d2*self.norm_fiber_velocity + d3) ** 2 + 1)) + d4
+        self.velocity_force = self.force_velocity(self.norm_fiber_velocity)
         return self.velocity_force
 
-    def get_velocity_force_linear_fv(self):
+    def compute_velocity_force_linear_fv(self):
         # Linear relationship
         lin_a = 1
         lin_b = 1
         self.velocity_force = lin_a * self.norm_fiber_velocity + lin_b
         return self.velocity_force
 
-    def get_hill_equilibrium(self):
-        self.get_fiber_length()
-        self.get_tendon_length()
-        self.get_active_fiber_force() # F/l relation
-        self.get_velocity_force() # F/v relation
-        self.get_passive_fiber_force()
-        self.get_tendon_force()
+
+
+    #---------------------------------
+    #       Evaluate muscle dynamics
+    #---------------------------------
+
+
+    def compute_norm_fiber_length_dot(self):
+        self.compute_norm_fiber_velocity()
+        # Equation S21:
+        self.norm_fiber_length_dot = self.maximal_fiber_velocity * self.norm_fiber_velocity
+        return self.norm_fiber_length_dot
+
+
+    def compute_hill_equilibrium(self):
+        self.compute_fiber_length()
+        self.compute_tendon_length()
+        self.compute_force_length() # F/l relation
+        self.compute_velocity_force() # F/v relation
+        self.compute_passive_fiber_force()
+        self.compute_tendon_force()
 
         # Equation S18:
         cosalpha = (self.mtLength - self.tendon_length) / self.fiber_length
@@ -224,13 +239,13 @@ class DeGrooteMuscle:
                           - self.tendon_force
         return hill_equilibrium
 
-    def get_hill_equilibrium_linear_fv(self):
-        self.get_fiber_length()
-        self.get_tendon_length()
-        self.get_active_fiber_force()
-        self.get_velocity_force_linear_fv()
-        self.get_passive_fiber_force()
-        self.get_tendon_force()
+    def compute_hill_equilibrium_linear_fv(self):
+        self.compute_fiber_length()
+        self.compute_tendon_length()
+        self.compute_force_length() # F/l relation
+        self.compute_velocity_force_linear_fv() # F/v relation
+        self.compute_passive_fiber_force()
+        self.compute_tendon_force()
 
         # Equation S18:
         cos_alpha = (self.mtLength - self.tendon_length) / self.fiber_length
@@ -241,6 +256,10 @@ class DeGrooteMuscle:
                           - self.tendon_force
         return hill_equilibrium
 
+    #---------------------------------
+    #       Plot functionalities
+    #---------------------------------
+
     # plot force length and force velocity curve
     def plot_fl_curve(self):
         lmtilde_vect = np.linspace(0.2, 1.7, 100)
@@ -249,8 +268,10 @@ class DeGrooteMuscle:
         ct = 0
         for lmtilde in lmtilde_vect:
             self.set_norm_fiber_length(lmtilde)
-            fpass_vect[ct] = self.get_passive_fiber_force()
-            [fact_vect[ct], temp] = self.get_active_fiber_force()
+            self.compute_passive_fiber_force()
+            self.compute_force_length()
+            fpass_vect[ct] = self.passive_fiber_force
+            fact_vect[ct] = self.active_fiber_force
             ct = ct + 1
         plt.figure()
         plt.plot(lmtilde_vect*self.optimal_fiber_length,
@@ -274,7 +295,7 @@ class DeGrooteMuscle:
         ct = 0
         for vmtilde in vmtilde_vect:
             self.set_norm_fiber_velocity(vmtilde)
-            fact_vect[ct] = self.get_velocity_force()
+            fact_vect[ct] = self.compute_velocity_force()
             ct = ct + 1
         plt.figure()
         plt.plot(vmtilde_vect*self.maximal_fiber_velocity*self.optimal_fiber_length,
@@ -295,8 +316,10 @@ class DeGrooteMuscle:
         ct = 0
         for lmtilde in lmtilde_vect:
             self.set_norm_fiber_length(lmtilde)
-            fpass_vect[ct] = self.get_passive_fiber_force()
-            [fact_vect[ct], temp] = self.get_active_fiber_force()
+            self.compute_passive_fiber_force()
+            self.compute_force_length()
+            fpass_vect[ct] = self.passive_fiber_force
+            fact_vect[ct] = self.active_fiber_force
             ct = ct+1
         plt.figure()
         plt.plot(lmtilde_vect, fact_vect, label='Active Force')
@@ -316,7 +339,7 @@ class DeGrooteMuscle:
         ct = 0
         for vmtilde in vmtilde_vect:
             self.set_norm_fiber_velocity(vmtilde)
-            fact_vect[ct] = self.get_velocity_force()
+            fact_vect[ct] = self.compute_velocity_force()
             ct = ct+1
         plt.figure()
         plt.plot(vmtilde_vect, fact_vect)

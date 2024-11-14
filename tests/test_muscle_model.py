@@ -5,6 +5,9 @@ from scipy.stats import alpha
 from degroote2016_muscle_model import DeGrooteMuscle
 
 import matplotlib.pyplot as plt
+import numpy as np
+
+import sympy as sp
 
 
 # create a muscle
@@ -28,26 +31,20 @@ muscle.plot_fv_curve()
 
 
 # test explicit formulation
-muscle.set_activation(0.1)
+muscle.set_activation(0.5)
 muscle.set_norm_fiber_length(1)
-muscle.set_muscle_tendon_length(0.70)
-lmtilde_dot = muscle.get_norm_fiber_length_dot()
-print(lmtilde_dot)
+muscle.set_muscle_tendon_length(0.715)
+lmtilde_dot = muscle.compute_norm_fiber_length_dot()
+
 
 # test implicit formulation
-muscle.set_activation(0.1)
+muscle.set_activation(0.5)
 muscle.set_norm_fiber_length(1)
-muscle.set_muscle_tendon_length(0.7)
-muscle.set_norm_fiber_length_dot(lmtilde_dot)
-#muscle.set_norm_fiber_velocity(lmtilde_dot/muscle.maximal_fiber_velocity)
-hill_err = muscle.get_hill_equilibrium()
-print(hill_err)
-
-# there is clearly something wrong with the implicit implementation.
-# check if inverting the FV curve works
+muscle.set_muscle_tendon_length(0.715)
+muscle.set_norm_fiber_velocity(lmtilde_dot/10)
+hill_err = muscle.compute_hill_equilibrium()
 
 
+# plot figures
 plt.show()
-
-
 
