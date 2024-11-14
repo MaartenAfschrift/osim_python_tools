@@ -6,6 +6,7 @@ from degroote2016_muscle_model import DeGrooteMuscle
 
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.integrate import odeint
 
 import sympy as sp
 
@@ -36,13 +37,35 @@ muscle.set_norm_fiber_length(1)
 muscle.set_muscle_tendon_length(0.715)
 lmtilde_dot = muscle.compute_norm_fiber_length_dot()
 
-
 # test implicit formulation
 muscle.set_activation(0.5)
 muscle.set_norm_fiber_length(1)
 muscle.set_muscle_tendon_length(0.715)
 muscle.set_norm_fiber_velocity(lmtilde_dot/10)
 hill_err = muscle.compute_hill_equilibrium()
+
+# simple simulation with this muscle
+# Test forward simulation with muscle model
+def muscle_state_derivative(lmtilde, t, muscle):
+    # dummy muscle activation as a function of time
+    a = 0.2 * np.sin(2 * t) + 0.3
+    # set the state of the muscle
+    muscle.set_activation(a)
+    muscle.set_norm_fiber_length(lmtilde)
+    # get the state derivative
+    lmtilde_dot = muscle.compute_norm_fiber_length_dot()
+    return lmtilde_dot
+
+
+t = np.linspace(0, 5, 500)
+x0 = 1
+x = odeint(muscle_state_derivative, x0, t, args=(muscle,))
+
+plt.figure()
+plt.plot(t, x)
+plt.xlabel('time (s)')
+plt.ylabel('normalized fiber length')
+
 
 
 # plot figures

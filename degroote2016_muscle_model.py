@@ -350,3 +350,35 @@ class DeGrooteMuscle:
 
         plt.xlabel('Normalized Fiber Velocity []')
         plt.ylabel('norm force []')
+
+    # get functions
+    def get_norm_fiber_length(self):
+        return self.norm_fiber_length
+
+    def get_tendon_shift(self):
+        return self.tendon_shift
+
+    def get_kT(self):
+        return self.kT
+
+    def get_maximal_isometric_force(self):
+        return self.maximal_isometric_force
+
+    def get_optimal_fiber_length(self):
+        return self.optimal_fiber_length
+
+    def get_force_length(self):
+        return self.active_fiber_force
+
+    def get_force_velocity(self):
+        return self.velocity_force
+
+    def get_passive_force(self):
+        return self.passive_fiber_force * self.maximal_isometric_force
+
+    def get_passive_force_norm(self):
+        return self.passive_fiber_force
+
+
+
+
