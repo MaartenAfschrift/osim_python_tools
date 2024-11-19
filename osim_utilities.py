@@ -211,10 +211,18 @@ class osim_subject:
     def read_ikfiles(self):
         # read ik files
         self.ikdat = []
+        self.ik_files = []
         for itrial in range(0, self.nfiles):
             ik_file = Path(os.path.join(self.ik_directory, self.filenames[itrial] + '.mot'))
             ik_data = self.read_ik(ik_file)
             self.ikdat.append(ik_data)
+            self.ikfiles.append(ik_file)
+    def read_ikfilenames(self):
+        # read ik files
+        self.ik_files = []
+        for itrial in range(0, self.nfiles):
+            ik_file = Path(os.path.join(self.ik_directory, self.filenames[itrial] + '.mot'))
+            self.ikfiles.append(ik_file)
 
     def read_ik(self, ik_file):
         if ik_file.exists():
@@ -353,6 +361,9 @@ class osim_subject:
         # check if we add external loads
         if self.folder_grfdat is not None:
             self.match_marker_grf_files() #  creates a list with matching
+        # add check if we already have ik_files
+        if len(self.ikfiles) == 0:
+            self.read_ikfilenames()
         # solve inverse dynamics for this trial
         InverseDynamics(model_input=self.modelpath,
                         xml_input=self.general_id_settings,

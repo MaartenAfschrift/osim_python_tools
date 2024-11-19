@@ -1,5 +1,6 @@
 # test batch processing on cardiff data
 #---------------------------------------
+from PyQt5.uic.properties import bool_
 
 # import utilities
 from osim_utilities import osim_subject
@@ -37,59 +38,61 @@ general_id_settings = os.path.join(mainpath, 'osim_settings','ID_settings.xml')
 loads_settings = os.path.join(mainpath, 'osim_settings','loads_settings.xml')
 
 
+bool_filter = False
 
-#-----------------------------------------------
-# ---          Filter trc file
-#----------------------------------------------
-# adapt trc file
-trc = trc_2_dict(os.path.join(trc_folder,'Refwalk_marker.trc'), rotation=None)
+if bool_filter:
+    #-----------------------------------------------
+    # ---          Filter trc file
+    #----------------------------------------------
+    # adapt trc file
+    trc = trc_2_dict(os.path.join(trc_folder,'Refwalk_marker.trc'), rotation=None)
 
-# there is a problem in the original trc files when t>=100s. It seems that it writes 100.005s as 100.01
-time = trc['time']
-isel = np.where(np.diff(time) == 0)
-time[isel] = time[isel]-0.005
+    # there is a problem in the original trc files when t>=100s. It seems that it writes 100.005s as 100.01
+    time = trc['time']
+    isel = np.where(np.diff(time) == 0)
+    time[isel] = time[isel]-0.005
 
-# low pass filter markers
-camera_rate = np.round(1./np.nanmean(np.diff(time)))
-order = 2
-cutoff = 6 / (camera_rate*0.5)
-b, a = signal.butter(order, cutoff, btype='low')
-for msel in trc['marker_names']:
-    dat = trc['markers'][msel]
-    # older problem with if marker is missing = 0, now should be nan
-    imissing = np.where(dat[:, 0] == 0)[0]
-    dat[imissing,:] = np.nan
-    trc['markers'][msel] = signal.filtfilt(b, a, dat.T).T
+    # low pass filter markers
+    camera_rate = np.round(1./np.nanmean(np.diff(time)))
+    order = 2
+    cutoff = 6 / (camera_rate*0.5)
+    b, a = signal.butter(order, cutoff, btype='low')
+    for msel in trc['marker_names']:
+        dat = trc['markers'][msel]
+        # older problem with if marker is missing = 0, now should be nan
+        imissing = np.where(dat[:, 0] == 0)[0]
+        dat[imissing,:] = np.nan
+        trc['markers'][msel] = signal.filtfilt(b, a, dat.T).T
 
-# write trc file
-nfr = len(time)
-trcfile = TRCFile(data_rate=camera_rate, camera_rate=camera_rate, num_frames=nfr, num_markers=0, units='m',
-              orig_data_rate=camera_rate, orig_data_start_frame=1, orig_num_frames=nfr, time=time)
-# add markers
-for msel in trc['marker_names']:
-    # add marker to trc object
-    marker = trc['markers'][msel]
-    trcfile.add_marker(msel, marker[:,0], marker[:,1], marker[:,2])
+    # write trc file
+    nfr = len(time)
+    trcfile = TRCFile(data_rate=camera_rate, camera_rate=camera_rate, num_frames=nfr, num_markers=0, units='m',
+                  orig_data_rate=camera_rate, orig_data_start_frame=1, orig_num_frames=nfr, time=time)
+    # add markers
+    for msel in trc['marker_names']:
+        # add marker to trc object
+        marker = trc['markers'][msel]
+        trcfile.add_marker(msel, marker[:,0], marker[:,1], marker[:,2])
 
-# write trc file
-if not os.path.exists(trc_folder_filter):
-    os.makedirs(trc_folder_filter)
-trcfile.write(os.path.join(trc_folder_filter, 'Refwalk_marker.trc'))
+    # write trc file
+    if not os.path.exists(trc_folder_filter):
+        os.makedirs(trc_folder_filter)
+    trcfile.write(os.path.join(trc_folder_filter, 'Refwalk_marker.trc'))
 
-#-----------------------------------------------
-# ---          Filter grf file
-#----------------------------------------------
-grf = readMotionFile(os.path.join(trc_folder,'Refwalk_GRF.mot'))
-sf = np.round(1/np.mean(np.diff(grf.time)))
-labels = grf.columns
-cutoff = 6/(sf*0.5)
-order = 2
-b, a = signal.butter(order, cutoff, btype='low')
-for lab in labels:
-    if lab!= 'time':
-        grf[lab] = signal.filtfilt(b,a, grf[lab])
+    #-----------------------------------------------
+    # ---          Filter grf file
+    #----------------------------------------------
+    grf = readMotionFile(os.path.join(trc_folder,'Refwalk_GRF.mot'))
+    sf = np.round(1/np.mean(np.diff(grf.time)))
+    labels = grf.columns
+    cutoff = 6/(sf*0.5)
+    order = 2
+    b, a = signal.butter(order, cutoff, btype='low')
+    for lab in labels:
+        if lab!= 'time':
+            grf[lab] = signal.filtfilt(b,a, grf[lab])
 
-WriteMotionFile(grf.to_numpy(), labels, os.path.join(trc_folder_filter,'Refwalk_GRF.mot'))
+    WriteMotionFile(grf.to_numpy(), labels, os.path.join(trc_folder_filter,'Refwalk_GRF.mot'))
 
 
 
