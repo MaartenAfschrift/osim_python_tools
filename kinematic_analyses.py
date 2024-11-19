@@ -133,6 +133,7 @@ class lmt_api():
             outfile = os.path.join(outpath, trialname + '_lmt.csv')
             lmt.to_csv(outfile)
             lmt_dat.append(lmt)
+            #
         return(lmt_dat)
 
 
@@ -416,6 +417,8 @@ class moment_arm_api():
             if boolprint:
                 moment_arm.to_csv(outfile)
             self.dm_dat.append(moment_arm)
+        # return dm datt
+        return(self.dm_dat)
 
 
     # some generic opensim functions to read properties from the model
