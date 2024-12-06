@@ -5,6 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import animation
 import sympy as sp
+import numpy as np
 
 
 
@@ -21,17 +22,17 @@ theta_min = -0.6  # minimum angle for next step transition (rad)
 theta = theta_max  # initial pendulum angle (rad)
 omega = -2  # initial angular velocity (rad/s)
 
-# symbolic equation for plastic collision with ground
-# Define symbols
-fi, fi_post, fid, fid_post, L, mass = sp.symbols('fi fi_post fid fid_post L mass', real=True)
-r = sp.Matrix([L * sp.cos(fi), L * sp.sin(fi), 0])
-r_post = sp.Matrix([L * sp.cos(fi_post), L * sp.sin(fi_post), 0])
-v = sp.Matrix([-L * fid * sp.sin(fi), L * fid * sp.cos(fi), 0])
-v_post = sp.Matrix([-L * fid_post * sp.sin(fi_post), L * fid_post * sp.cos(fi_post), 0])
-eq_Ang = sp.Eq(r.cross(mass * v)[2] - r_post.cross(mass * v_post)[2],0)  # Use .cross()
-solution = sp.solve(eq_Ang, fid_post)
-# this shows that fid = fid_post (which makes sense obviously)
-print(solution)
+# # symbolic equation for plastic collision with ground
+# # Define symbols
+# fi, fi_post, fid, fid_post, L, mass = sp.symbols('fi fi_post fid fid_post L mass', real=True)
+# r = sp.Matrix([L * sp.cos(fi), L * sp.sin(fi), 0])
+# r_post = sp.Matrix([L * sp.cos(fi_post), L * sp.sin(fi_post), 0])
+# v = sp.Matrix([-L * fid * sp.sin(fi), L * fid * sp.cos(fi), 0])
+# v_post = sp.Matrix([-L * fid_post * sp.sin(fi_post), L * fid_post * sp.cos(fi_post), 0])
+# eq_Ang = sp.Eq(r.cross(mass * v)[2] - r_post.cross(mass * v_post)[2],0)  # Use .cross()
+# solution = sp.solve(eq_Ang, fid_post)
+# # this shows that fid = fid_post (which makes sense obviously)
+# print(solution)
 
 # Time parameters
 T_total = 5.0  # total simulation time (s)
