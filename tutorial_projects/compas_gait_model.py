@@ -10,13 +10,17 @@ from matplotlib import animation
 from scipy.integrate import solve_ivp
 from scipy.interpolate import interp1d
 
+# ToDo: not sure if the collision map is correct
+# double check this ?
+# try newton method to find limit cycle (if I implement gravity)
+
 # simulation information
 Settings ={}
 Settings['dt'] = 0.001
 Settings['OdeIntegrator'] = True
 Settings['tfinal']  = 10
-Settings['init_state'] = [0, 0, 0, 0]  # initial state of the system [fi1, fi2, fid1, fid2]
-
+Settings['init_state'] = [1.9, 5.93, -2.5, 0]  # initial state of the system [fi1, fi2, fid1, fid2]
+Settings['max_steps'] = 20
 # model parameters
 L1 =1
 L2 = 1
@@ -135,7 +139,17 @@ def dx_dt(t, x):
     qdd = f_qdd(x[0], x[1], x[2], x[3])
     return [x[2], x[3], qdd[0][0], qdd[1][0]]
 
+def step_transition(t, x):
+    # check if condition for step transition is met
+    fi1 = x[0]
+    fi2 = x[1]
+    condition = 99
+    if fi1<np.pi:
+        condition = fi1 + fi2 - 2*np.pi
+    return condition
 
+step_transition.terminal = True  # Stop the integration when this condition is met
+step_transition.direction = -1   # Only trigger when crossing zero in the negative direction
 
 if Settings['OdeIntegrator']:
     t_span = (0, Settings['tfinal'])
@@ -146,11 +160,39 @@ if Settings['OdeIntegrator']:
         xinit,
         method='RK45',
         rtol=1e-10,
-        atol=1e-10
+        atol=1e-10,
+        events = step_transition
     )
+    t_end = solution.t[-1]
+    solution_store = []
+    solution_store.append(solution)
+    while (t_end<Settings['tfinal'] ) & (len(solution_store)<Settings['max_steps']):
+        # compute
+        # iterate simulation
+        t_span = (t_end, Settings['tfinal'])
+        x_pre_collision = solution.y[:, -1]
+        #use collision map
+        x_post_collision = f_x_hs_map(x_pre_collision[0], x_pre_collision[1], x_pre_collision[2], x_pre_collision[3])
+        xinit = x_post_collision
+        solution = solve_ivp(
+            dx_dt,
+            t_span,
+            xinit,
+            method='RK45',
+            rtol=1e-10,
+            atol=1e-10,
+            events=step_transition
+        )
+        t_end = solution.t[-1]
+        solution_store.append(solution)
+        print(len(solution_store))
+
+
+
     # unpack solution
     time = solution.t
     state_matrix = solution.y.T
+
 
 else:
     # Time parameters
@@ -187,6 +229,7 @@ plt.figure()
 for i in range(0,4):
     plt.subplot(1,4,i+1)
     plt.plot(time, state_matrix[:,i])
+
 
 # compute energy
 EkinV = np.zeros(len(time))
@@ -236,7 +279,7 @@ def update(frame):
     return leg1, leg2
 
 # Create the animation
-ani = animation.FuncAnimation(fig, update, frames=len(time_int), blit=True, interval=10)
+#ani = animation.FuncAnimation(fig, update, frames=len(time_int), blit=True, interval=10)
 
 
 
