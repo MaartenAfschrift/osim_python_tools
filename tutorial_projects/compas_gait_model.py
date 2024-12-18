@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 from matplotlib import animation
 from scipy.integrate import solve_ivp
 from scipy.interpolate import interp1d
+from tests.compas_gait_utilities import gen_equations_of_motion, forward_sim
 
 # ToDo: not sure if the collision map is correct
 # double check this ?
@@ -19,14 +20,24 @@ Settings ={}
 Settings['dt'] = 0.001
 Settings['OdeIntegrator'] = True
 Settings['tfinal']  = 10
-Settings['init_state'] = [1.9, 5.93, -2.5, 0]  # initial state of the system [fi1, fi2, fid1, fid2]
+Settings['init_state'] = [1.9, 5.93, -2, 0]  # initial state of the system [fi1, fi2, fid1, fid2]
 Settings['max_steps'] = 20
+
 # model parameters
 L1 =1
 L2 = 1
 m1 = 5
 m2 = 5
 m3 = 70-m1-m2
+
+# try to generate equations of motion for the compas gait model using function
+func_set = gen_equations_of_motion(L1, L2, m1, m2, m3)
+
+# run one forward simulation
+Settings['sim_one_cycle'] = True # stop at next heelstrike
+sim_states = forward_sim(Settings, func_set) # run simulation
+
+
 
 #--------------------------------------------
 #  --------- Equations of motion ------------

@@ -105,6 +105,9 @@ if bool_filter:
 
 # create object for processing
 subj = osim_subject(model_path)
+[m_tot, m_bodies, bodynames] = subj.getmodelmass()
+print('total mass: ', m_tot)
+
 
 # set all the trc files
 subj.set_trcfiles_fromfolder(trc_folder_filter)

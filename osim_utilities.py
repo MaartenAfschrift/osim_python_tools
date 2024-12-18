@@ -50,6 +50,7 @@ class osim_subject:
         self.bodykin_folder = self.maindir.joinpath('BK')
         self.moment_arm_folder = self.maindir.joinpath('moment_arm')
         self.lmt_folder = self.maindir.joinpath('lmt')
+        self.angmom_folder =  self.maindir.joinpath('ang_mom')
         self.extload_files = []
         self.id_dat = [] # inverse dynamics data
         self.bk_pos = [] # bodykinematics data -- position
@@ -479,6 +480,20 @@ class osim_subject:
             print('... file ' + str(ifile + 1) + '/' + str(self.nfiles))
         return(impulse_trials)
 
+    def compute_angular_momentum(self):
+        # compute bodykinematics
+        if len(self.bk_pos) == 0:
+            # try to read the bodykinematics files
+            self.read_bkfiles()
+            if len(self.bk_pos) == 0:
+                # compute bodykinematics
+                self.compute_bodykin()
+        # compute angular momentum
+        angular_momentum(self.modelpath, self.angmom_folder, ikfiles = self.ikfiles,
+                         bk_pos = self.bk_pos, bk_vel = self.bk_vel)
+
+
+
 
     # Getters
     def get_modelpath(self):
@@ -532,6 +547,9 @@ class osim_subject:
     def get_marker_dir(self):
         return self.marker_dir
 
+    def get_angmom_folder(self):
+        return self.angmom_folder
+
     # Setters
     def set_modelpath(self, modelpath):
         self.modelpath = modelpath
@@ -576,6 +594,9 @@ class osim_subject:
 
     def set_lmt_folder(self, folder):
         self.lmt_folder = folder
+
+    def set_angmom_folder(self, folder):
+        self.angmom_folder = folder
 
 
     # set functions (not from chatgpt)
@@ -676,6 +697,167 @@ class osim_subject:
             df = pd.concat([df, new_row], ignore_index=True)
         df.to_csv(outfile)
         print('printend timing hitting ball ', outfile)
+
+
+class angular_momentum:
+    def __init__(self, modelfile, outputdir, ikfiles = None,
+               overwrite = False, bk_pos = None, bk_vel = None):
+        # init variables
+        self.modelpath = modelfile
+        self.model = osim.Model(self.modelpath)
+        self.model.initSystem()
+        self.outputdir = outputdir
+        self.ikfiles = ikfiles
+        self.overwrite = overwrite
+        self.bk_pos = bk_pos
+        self.bk_vel = bk_vel
+
+        # compute angular momentum
+        self.compute_angular_momentum()
+
+
+    def read_bodykin(self, bkfolder, trial_stem):
+        # path to position and velocity file
+        bk_pos_file = Path(os.path.join(bkfolder, trial_stem + '_BodyKinematics_pos_global.sto'))
+        bk_vel_file = Path(os.path.join(bkfolder, trial_stem + '_BodyKinematics_vel_global.sto'))
+        if bk_pos_file.exists():
+            bk_pos = readMotionFile(bk_pos_file)
+        else:
+            bk_pos = []
+        if bk_vel_file.exists():
+            bk_vel = readMotionFile(bk_vel_file)
+        else:
+            bk_vel = []
+            print('could find read file ', bk_vel_file)
+        return(bk_pos, bk_vel)
+
+    def compute_angular_momentum(self):
+
+        # compute bodykinematics if needed
+        if (self.bk_pos is None or self.bk_vel is None):
+            # compute bodykinematics
+            bodykinematics(self.modelpath, self.outputdir, self.ikfiles, overwrite=self.overwrite)
+            # read bodykinematics
+            self.bk_pos = []
+            self.bk_vel = []
+            for itrial in range(0, len(self.ikfiles)):
+                [bk_pos, bk_vel] = self.read_bodykin(self.outputdir, self.ikfiles[itrial].stem)
+                self.bk_pos.append(bk_pos)
+                self.bk_vel.append(bk_vel)
+
+        # use function to compute bodykinematics for each trial
+        for itrial in range(0, len(self.ikfiles)):
+            # get bodykinematics
+            bk_pos = self.bk_pos[itrial]
+            bk_vel = self.bk_vel[itrial]
+            # get ik data
+            self.compute_angular_momentum_ifile(bk_pos, bk_vel)
+
+    def compute_angular_momentum_ifile(self, bk_pos, bk_vel):
+
+        # get number of bodies in opensim model
+        bodies = self.model.getBodySet()
+        nbodies = bodies.getSize()
+        name = 'center_of_mass'
+        rows = len(bk_pos.time)
+        angular_momentum_body = np.zeros((rows, nbodies * 3))
+        com_pos = bk_pos[['center_of_mass_X', 'center_of_mass_Y', 'center_of_mass_Z']].values
+        com_vel = bk_vel[['center_of_mass_X', 'center_of_mass_Y', 'center_of_mass_Z']].values
+        ibody = 0
+        body = bodies.get(ibody)
+        mass = body.getMass()
+        name = body.getName()
+
+        # get position and velocity info
+        pos = bk_pos[[name + '_X', name + '_Y', name + '_Z']].values
+        fi = bk_vel[[name + '_OX', name + '_OY', name + '_OZ']].values
+        vel = bk_vel[[name + '_X', name + '_Y', name + '_Z']].values
+        fi_dot = bk_vel[[name + '_OX', name + '_OY', name + '_OZ']].values
+
+
+        # Get inertia tensor
+        I_osim_Mom = body.getInertia().getMoments()
+        I_osim_Prod = body.getInertia().getProducts()
+        I = np.array([[I_osim_Mom.get(0), -I_osim_Prod.get(0), -I_osim_Prod.get(1)],
+                      [-I_osim_Prod.get(0), I_osim_Mom.get(1), -I_osim_Prod.get(2)],
+                      [-I_osim_Prod.get(1), -I_osim_Prod.get(2), I_osim_Mom.get(2)]])
+
+        # Compute angular momentum
+        for t in range(len(bk_pos.time)):
+            # Transform inertia tensor to world coordinate system
+            T_Body = transform(fi[t, 0], fi[t, 1], fi[t, 2])
+            I_world = T_Body.T @ I @ T_Body
+
+            angular_momentum_body[t, ibody*3:ibody*3+2] = (
+                np.cross((pos[t, :] - com_pos[t, :]),
+                         mass * (vel[t, :] - com_vel[t, :])) +
+                I_world @ fi_dot[t, :]
+            )
+
+        # this can also be done using
+        # so the only thing we have to do is set the state of the system. Lets try this
+        # as well
+        # also option to get state from ik files (and computes velocities from ik files)
+        #self.model.calcAngularMomentum(self.model.initSystem())
+
+
+
+        # # Initialize variables
+        # rows = Pos.shape[0]
+        # Angular_momentum_body = np.zeros((rows, nbodies * 3))
+        # whole_body_L = np.zeros((rows, 3))
+        # headers = []
+        #
+        # # Loop over each segment to compute angular momentum
+        # for i in range(nbodies):
+        #     # Get body information
+        #     body = bodies.get(i)
+        #     mass = body.getMass()
+        #     name = body.getName()
+        #
+        #     headers.extend([f"{name}_Lx", f"{name}_Ly", f"{name}_Lz"])
+        #
+        #     # Get position and velocity info
+        #     index_d_segment = colheaders.index(f"{name}_X")
+        #     Pos_segm = Pos[:, index_d_segment:index_d_segment + 3]
+        #     Pos_dot_segm = Vel[:, index_d_segment:index_d_segment + 3]
+        #
+        #     # Get angular velocity info
+        #     O_segm = Pos[:, index_d_segment + 3:index_d_segment + 6]
+        #     O_dot_segm = np.radians(Vel[:, index_d_segment + 3:index_d_segment + 6])
+        #
+        #     # Get inertia tensor
+        #     I_osim_Mom = body.getInertia().getMoments()
+        #     I_osim_Prod = body.getInertia().getProducts()
+        #     I = np.array([
+        #         [I_osim_Mom.get(0), -I_osim_Prod.get(0), -I_osim_Prod.get(1)],
+        #         [-I_osim_Prod.get(0), I_osim_Mom.get(1), -I_osim_Prod.get(2)],
+        #         [-I_osim_Prod.get(1), -I_osim_Prod.get(2), I_osim_Mom.get(2)]
+        #     ])
+        #
+        #     # Compute angular momentum
+        #     for t in range(len(time)):
+        #         # Transform inertia tensor to world coordinate system
+        #         T_Body = transform(O_segm[t, 0], O_segm[t, 1], O_segm[t, 2])
+        #         I_world = T_Body.T @ I @ T_Body
+        #
+        #         Angular_momentum_body[t, i * 3:(i + 1) * 3] = (
+        #                 np.cross((Pos_segm[t, :] - COM[t, :]),
+        #                          mass * (Pos_dot_segm[t, :] - COM_dot[t, :])) +
+        #                 I_world @ O_dot_segm[t, :]
+        #         )
+        #
+        #     # Accumulate whole body angular momentum
+        #     whole_body_L += Angular_momentum_body[:, i * 3:(i + 1) * 3]
+        #
+        #     # Accumulate total body mass
+        #     bodymass += mass
+        #
+        # # Add whole body angular momentum to headers
+        # headers.extend(['whole_body_Lx', 'whole_body_Ly', 'whole_body_Lz'])
+        # data_out = np.hstack((Angular_momentum_body, whole_body_L))
+        #
+        # return whole_body_L, data_out, headers, time, bodymass
 
 
 

@@ -468,3 +468,10 @@ class moment_arm_api():
             print('could find read file ', ik_file)
         return(ik_data)
 
+# create class to compute whole body angular momentum from kinematics data
+
+
+
+
+
+
