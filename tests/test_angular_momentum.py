@@ -19,16 +19,18 @@ osim_model = os.path.join(datapath_main, 'subject01.osim')
 datapath = datapath_main
 my_subject = osim_subject(osim_model, maindir= datapath)
 
-# set ik files
-
 # test set a specific ik file
-ikfile = os.path.join(datapath,'normal.mot')
+ikfile = os.path.join(datapath,'subject01_walk1_ik.mot')
 my_subject.set_ikfiles(ikfile)
 my_subject.read_ikfiles()
 
-# compute body kinematics
-my_subject.compute_bodykin()
-
 # compute angular momentum
+my_subject.set_angmom_folder(os.path.join(datapath_main,'angmom'))
 my_subject.compute_angular_momentum()
+
+# plot angular momentum
+plt.figure()
+plt.plot(my_subject.angmom[0].time,my_subject.angmom[0].Lx)
+plt.show()
+
 

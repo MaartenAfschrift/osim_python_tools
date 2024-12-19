@@ -9,6 +9,7 @@ from inverse_kinematics import InverseKinematics
 from kinematic_analyses import bodykinematics, lmt_api, moment_arm_api
 from general_utilities import readMotionFile, WriteMotionFile
 import difflib
+from scipy.interpolate import UnivariateSpline
 
 
 
@@ -56,7 +57,7 @@ class osim_subject:
         self.bk_pos = [] # bodykinematics data -- position
         self.bk_vel = [] # bodykinematics data -- velocity
         self.ikdat = []
-        self.ikdat = []
+        self.angmom = []
         self.marker_dir = None # directory with trc files
         self.folder_grfdat = None
         self.matched_grfs = None # list with matching grfdat names for the motion files
@@ -211,16 +212,23 @@ class osim_subject:
 
     def read_ikfiles(self):
         # read ik files
-        self.ikdat = []
-        self.ik_files = []
-        for itrial in range(0, self.nfiles):
-            ik_file = Path(os.path.join(self.ik_directory, self.filenames[itrial] + '.mot'))
-            ik_data = self.read_ik(ik_file)
-            self.ikdat.append(ik_data)
-            self.ikfiles.append(ik_file)
+        if self.ikfiles is None or len(self.ikfiles) == 0:
+            self.ikdat = []
+            self.ikfiles = []
+            for itrial in range(0, self.nfiles):
+                ik_file = Path(os.path.join(self.ik_directory, self.filenames[itrial] + '.mot'))
+                ik_data = self.read_ik(ik_file)
+                self.ikdat.append(ik_data)
+                self.ikfiles.append(ik_file)
+        else:
+            self.ikdat = []
+            for ifile in self.ikfiles:
+                ik_data = self.read_ik(ifile)
+                self.ikdat.append(ik_data)
+
     def read_ikfilenames(self):
         # read ik files
-        self.ik_files = []
+        self.ikfiles = []
         for itrial in range(0, self.nfiles):
             ik_file = Path(os.path.join(self.ik_directory, self.filenames[itrial] + '.mot'))
             self.ikfiles.append(ik_file)
@@ -481,19 +489,12 @@ class osim_subject:
         return(impulse_trials)
 
     def compute_angular_momentum(self):
-        # compute bodykinematics
-        if len(self.bk_pos) == 0:
-            # try to read the bodykinematics files
-            self.read_bkfiles()
-            if len(self.bk_pos) == 0:
-                # compute bodykinematics
-                self.compute_bodykin()
         # compute angular momentum
-        angular_momentum(self.modelpath, self.angmom_folder, ikfiles = self.ikfiles,
-                         bk_pos = self.bk_pos, bk_vel = self.bk_vel)
-
-
-
+        ang_mom = angular_momentum(self.modelpath, self.angmom_folder,
+                         ikfiles = self.ikfiles, ikdat = self.ikdat)
+        self.angmom = ang_mom.get_angmom_results()
+        # how should I manage memory here? is ang_mom object stored ?
+        # if this is the case it should be deleted
 
     # Getters
     def get_modelpath(self):
@@ -701,59 +702,87 @@ class osim_subject:
 
 class angular_momentum:
     def __init__(self, modelfile, outputdir, ikfiles = None,
-               overwrite = False, bk_pos = None, bk_vel = None):
+               overwrite = False, ikdat = None):
         # init variables
         self.modelpath = modelfile
         self.model = osim.Model(self.modelpath)
         self.model.initSystem()
         self.outputdir = outputdir
-        self.ikfiles = ikfiles
         self.overwrite = overwrite
-        self.bk_pos = bk_pos
-        self.bk_vel = bk_vel
+        self.ikdat = ikdat
+        self.angmom_results = []
+
+        # read ikfiles if needed
+        if ikfiles is not None:
+            if not isinstance(ikfiles, list):
+                self.ikfiles = [ikfiles]
+            else:
+                self.ikfiles = ikfiles
+
+            if not isinstance(self.ikfiles[0], Path):
+                self.ikfiles = [Path(i) for i in self.ikfiles]
+
+            self.nfiles = len(self.ikfiles)
+        else:
+            self.ikfiles = None
+
+        if (self.ikdat is None or len(self.ikdat) == 0):
+            # check if ikfile is input or ikdat
+            if self.ikfiles is None:
+                print('please add ikfile or ikdat as input')
+            else:
+                self.ikdat = []
+                for ikfile in self.ikfiles:
+                    ikdat_sel = readMotionFile(ikfile)
+                    self.ikdat.append(ikdat_sel)
 
         # compute angular momentum
         self.compute_angular_momentum()
 
-
-    def read_bodykin(self, bkfolder, trial_stem):
-        # path to position and velocity file
-        bk_pos_file = Path(os.path.join(bkfolder, trial_stem + '_BodyKinematics_pos_global.sto'))
-        bk_vel_file = Path(os.path.join(bkfolder, trial_stem + '_BodyKinematics_vel_global.sto'))
-        if bk_pos_file.exists():
-            bk_pos = readMotionFile(bk_pos_file)
-        else:
-            bk_pos = []
-        if bk_vel_file.exists():
-            bk_vel = readMotionFile(bk_vel_file)
-        else:
-            bk_vel = []
-            print('could find read file ', bk_vel_file)
-        return(bk_pos, bk_vel)
-
     def compute_angular_momentum(self):
-
-        # compute bodykinematics if needed
-        if (self.bk_pos is None or self.bk_vel is None):
-            # compute bodykinematics
-            bodykinematics(self.modelpath, self.outputdir, self.ikfiles, overwrite=self.overwrite)
-            # read bodykinematics
-            self.bk_pos = []
-            self.bk_vel = []
-            for itrial in range(0, len(self.ikfiles)):
-                [bk_pos, bk_vel] = self.read_bodykin(self.outputdir, self.ikfiles[itrial].stem)
-                self.bk_pos.append(bk_pos)
-                self.bk_vel.append(bk_vel)
-
         # use function to compute bodykinematics for each trial
         for itrial in range(0, len(self.ikfiles)):
-            # get bodykinematics
-            bk_pos = self.bk_pos[itrial]
-            bk_vel = self.bk_vel[itrial]
-            # get ik data
-            self.compute_angular_momentum_ifile(bk_pos, bk_vel)
+            # compute angular momentum
+            angmom = self.compute_angular_momentum_ifile(
+                self.ikdat[itrial])
+            # print to a csv file
+            if not os.path.exists(self.outputdir):
+                os.makedirs(self.outputdir)
+            trialname = f'{self.ikfiles[itrial].stem}'
+            outfile = os.path.join(self.outputdir, trialname + '_L.csv')
+            angmom.to_csv(outfile)
+            # store results
+            self.angmom_results.append(angmom)
 
-    def compute_angular_momentum_ifile(self, bk_pos, bk_vel):
+    def compute_angular_momentum_ifile(self, ikdat):
+        # set state from ikfile
+        states = set_state_from_ikdat(self.model, ikdat)
+        time = ikdat.time
+
+        # loop over states
+        nfr = len(states)
+        L = np.zeros((nfr, 3))
+        for i in range(0, nfr):
+            # realize model to velocity state
+            state = states[i]
+            self.model.realizeVelocity(state)
+            # compute bodykinematics
+            L_vec3 = self.model.calcAngularMomentum(state)
+            L[i, 0] = L_vec3.get(0)
+            L[i, 1] = L_vec3.get(1)
+            L[i, 2] = L_vec3.get(2)
+
+        # return as a dataframe
+        data = np.concatenate(
+            (np.expand_dims(time, axis=1), L), axis=1)
+        columns = ['time','Lx', 'Ly', 'Lz']
+        angmom = pd.DataFrame(data = data, columns = columns)
+        return(angmom)
+
+    def get_angmom_results(self):
+        return(self.angmom_results)
+
+    def compute_angular_momentum_ifile_depricated(self, bk_pos, bk_vel):
 
         # get number of bodies in opensim model
         bodies = self.model.getBodySet()
@@ -774,7 +803,6 @@ class angular_momentum:
         vel = bk_vel[[name + '_X', name + '_Y', name + '_Z']].values
         fi_dot = bk_vel[[name + '_OX', name + '_OY', name + '_OZ']].values
 
-
         # Get inertia tensor
         I_osim_Mom = body.getInertia().getMoments()
         I_osim_Prod = body.getInertia().getProducts()
@@ -794,71 +822,20 @@ class angular_momentum:
                 I_world @ fi_dot[t, :]
             )
 
-        # this can also be done using
-        # so the only thing we have to do is set the state of the system. Lets try this
-        # as well
-        # also option to get state from ik files (and computes velocities from ik files)
-        #self.model.calcAngularMomentum(self.model.initSystem())
-
-
-
-        # # Initialize variables
-        # rows = Pos.shape[0]
-        # Angular_momentum_body = np.zeros((rows, nbodies * 3))
-        # whole_body_L = np.zeros((rows, 3))
-        # headers = []
-        #
-        # # Loop over each segment to compute angular momentum
-        # for i in range(nbodies):
-        #     # Get body information
-        #     body = bodies.get(i)
-        #     mass = body.getMass()
-        #     name = body.getName()
-        #
-        #     headers.extend([f"{name}_Lx", f"{name}_Ly", f"{name}_Lz"])
-        #
-        #     # Get position and velocity info
-        #     index_d_segment = colheaders.index(f"{name}_X")
-        #     Pos_segm = Pos[:, index_d_segment:index_d_segment + 3]
-        #     Pos_dot_segm = Vel[:, index_d_segment:index_d_segment + 3]
-        #
-        #     # Get angular velocity info
-        #     O_segm = Pos[:, index_d_segment + 3:index_d_segment + 6]
-        #     O_dot_segm = np.radians(Vel[:, index_d_segment + 3:index_d_segment + 6])
-        #
-        #     # Get inertia tensor
-        #     I_osim_Mom = body.getInertia().getMoments()
-        #     I_osim_Prod = body.getInertia().getProducts()
-        #     I = np.array([
-        #         [I_osim_Mom.get(0), -I_osim_Prod.get(0), -I_osim_Prod.get(1)],
-        #         [-I_osim_Prod.get(0), I_osim_Mom.get(1), -I_osim_Prod.get(2)],
-        #         [-I_osim_Prod.get(1), -I_osim_Prod.get(2), I_osim_Mom.get(2)]
-        #     ])
-        #
-        #     # Compute angular momentum
-        #     for t in range(len(time)):
-        #         # Transform inertia tensor to world coordinate system
-        #         T_Body = transform(O_segm[t, 0], O_segm[t, 1], O_segm[t, 2])
-        #         I_world = T_Body.T @ I @ T_Body
-        #
-        #         Angular_momentum_body[t, i * 3:(i + 1) * 3] = (
-        #                 np.cross((Pos_segm[t, :] - COM[t, :]),
-        #                          mass * (Pos_dot_segm[t, :] - COM_dot[t, :])) +
-        #                 I_world @ O_dot_segm[t, :]
-        #         )
-        #
-        #     # Accumulate whole body angular momentum
-        #     whole_body_L += Angular_momentum_body[:, i * 3:(i + 1) * 3]
-        #
-        #     # Accumulate total body mass
-        #     bodymass += mass
-        #
-        # # Add whole body angular momentum to headers
-        # headers.extend(['whole_body_Lx', 'whole_body_Ly', 'whole_body_Lz'])
-        # data_out = np.hstack((Angular_momentum_body, whole_body_L))
-        #
-        # return whole_body_L, data_out, headers, time, bodymass
-
+    def read_bodykin_depricated(self, bkfolder, trial_stem):
+        # path to position and velocity file
+        bk_pos_file = Path(os.path.join(bkfolder, trial_stem + '_BodyKinematics_pos_global.sto'))
+        bk_vel_file = Path(os.path.join(bkfolder, trial_stem + '_BodyKinematics_vel_global.sto'))
+        if bk_pos_file.exists():
+            bk_pos = readMotionFile(bk_pos_file)
+        else:
+            bk_pos = []
+        if bk_vel_file.exists():
+            bk_vel = readMotionFile(bk_vel_file)
+        else:
+            bk_vel = []
+            print('could find read file ', bk_vel_file)
+        return(bk_pos, bk_vel)
 
 
 def transform(Rx, Ry, Rz, bool_deg_input = True):
@@ -913,6 +890,40 @@ def osim_body_I(Inertia):
     I_body[2, 1]= I_osim_Prod.get(2)
     I_body[1, 2]= I_osim_Prod.get(2)
     return(I_body)
+
+def set_state_from_ikdat(model, ikdat):
+    # compute time derivative ik file
+    ik_dot = pd.DataFrame()
+    ik_dot['time'] = ikdat['time']
+    for col in ikdat.columns:
+        if col != 'time':
+            spline = UnivariateSpline(ikdat['time'], ikdat[col], s=0)
+            ik_dot[col] = spline.derivative()(ikdat['time'])
+
+    # set state from ikfile
+    state = model.initSystem()
+    coordset = model.getCoordinateSet()
+    ncoords = coordset.getSize()
+
+    state_vector = []
+    for t in range(0, len(ikdat.time)):
+        for i in range(0, ncoords):
+            name = coordset.get(i).getName()
+            if (coordset.get(i).getMotionType() == 1):
+                # rotational dof
+                coordset.get(name).setValue(state, ikdat[name][t] * np.pi / 180)
+                coordset.get(name).setSpeedValue(state, ik_dot[name][t] * np.pi / 180)
+            else:
+                # translation dof
+                coordset.get(name).setValue(state, ikdat[name][t])
+                coordset.get(name).setSpeedValue(state, ik_dot[name][t])
+        # this is a pointer problem
+        # we probably cannot do this properly without init the system on
+        # every time frame. so we probably have to incoroperate this in
+        # the specific function
+        state_vector.append(state)
+
+    return(state_vector)
 
 
 
