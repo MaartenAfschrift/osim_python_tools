@@ -20,21 +20,26 @@ from utilsTRC import TRCFile, trc_2_dict
 from scipy import signal
 
 matplotlib.use('Qt5Agg') # interactive backend for matplotlib figures
+plt.ion()
 
 # path information (this should be everything :))
-mainpath = 'C:/Users/mat950/Documents/Data/Cardiff_Lonit/osimData_young'
-datapath = os.path.join(mainpath,'Patient2')
+mainpath = 'C:/Users/lonit/OneDrive - Vrije Universiteit Amsterdam/Cardiff_Lonit/osimData_young'
+datapath = os.path.join(mainpath,'Patient10')
+
+# loading
 model_path = os.path.join(datapath, 'model','scaled_model_marker.osim')
 trc_folder = os.path.join(datapath, 'RefWalk', 'data')
-trc_folder_filter = os.path.join(datapath, 'RefWalk', 'data_filt')
-grf_folder = os.path.join(datapath, 'RefWalk', 'data')
-ik_folder = os.path.join(datapath, 'RefWalk', 'ik_vx')
-id_folder = os.path.join(datapath, 'RefWalk', 'ID_vx')
-lmt_folder = os.path.join(datapath, 'RefWalk', 'lmt_test')
-dm_folder = os.path.join(datapath, 'RefWalk', 'dM_test')
+# grf_folder = os.path.join(datapath, 'RefWalk', 'data')
 general_ik_settings = os.path.join(mainpath, 'osim_settings','IK_settings.xml')
 general_id_settings = os.path.join(mainpath, 'osim_settings','ID_settings.xml')
 loads_settings = os.path.join(mainpath, 'osim_settings','loads_settings.xml')
+
+# saving
+trc_folder_filter = os.path.join(datapath, 'RefWalk', 'Lonit_osim', 'data_filt')
+ik_folder = os.path.join(datapath, 'RefWalk', 'Lonit_osim', 'IK_prefilt')
+id_folder = os.path.join(datapath, 'RefWalk', 'Lonit_osim', 'ID_prefilt')
+lmt_folder = os.path.join(datapath, 'RefWalk', 'Lonit_osim', 'lmt_prefilt')
+dm_folder = os.path.join(datapath, 'RefWalk', 'Lonit_osim', 'dM_prefilt')
 
 
 
@@ -111,6 +116,10 @@ subj.set_ik_directory(ik_folder)
 subj.set_general_ik_settings(general_ik_settings)
 subj.compute_inverse_kinematics(overwrite= False)
 
+#-----------------------------------------------
+# ---           Filter IK
+#----------------------------------------------
+
 # run inverse dynamics
 subj.set_generic_external_loads(loads_settings)
 subj.set_folder_grfdat(trc_folder_filter)
@@ -129,3 +138,26 @@ subj.set_momentarm_folder(dm_folder)
 subj.compute_dM(tstart = tstart, tend = tend)
 
 
+# test lmt and dm
+lmt = subj.lmt_dat[0]
+dm = subj.dm_dat[0]
+
+plt.figure()
+plt.subplot(1,2,1)
+plt.plot(lmt.med_gas_r)
+plt.subplot(1,2,2)
+plt.plot(dm.med_gas_r_knee_angle_r)
+plt.plot(dm.med_gas_r_ankle_angle_r)
+
+# subj.ikdat[0].keys()
+plt.figure()
+i_ik = range(np.where(subj.ikdat[0]['time']>=tstart)[0][0], np.where(subj.ikdat[0]['time']>tend)[0][0])
+plt.subplot(1,2,1)
+plt.plot(subj.ikdat[0]['time'][i_ik],subj.ikdat[0]['ankle_angle_r'][i_ik])
+plt.plot(subj.ikdat[0]['time'][i_ik],subj.ikdat[0]['knee_angle_r'][i_ik])
+
+plt.subplot(1,2,2)
+plt.plot(subj.ikdat[0]['time'][i_ik],subj.ikdat[0]['ankle_angle_l'][i_ik])
+plt.plot(subj.ikdat[0]['time'][i_ik],subj.ikdat[0]['knee_angle_l'][i_ik])
+
+plt.show()

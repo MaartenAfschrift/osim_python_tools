@@ -215,6 +215,7 @@ class osim_subject:
             ik_file = Path(os.path.join(self.ik_directory, self.filenames[itrial] + '.mot'))
             ik_data = self.read_ik(ik_file)
             self.ikdat.append(ik_data)
+            self.ikfiles.append(ik_file)
 
     def read_ik(self, ik_file):
         if ik_file.exists():
