@@ -8,7 +8,7 @@ matplotlib.use('Qt5Agg') # interactive backend for matplotlib figures
 
 
 # path to data
-datapath_main = 'C:/Users/mat950/Documents/Data/Cardiff_Lonit/osimData_young/Patient2'
+datapath_main = 'D:\Data\Patient2'
 
 # init an opensim subject
 osim_model = os.path.join(datapath_main, 'model', 'scaled_model_marker_osim45.osim')
@@ -41,5 +41,6 @@ plt.plot(dm.med_gas_r_knee_angle_r)
 plt.plot(dm.med_gas_r_ankle_angle_r)
 
 
+plt.show()
 
 print('test')
