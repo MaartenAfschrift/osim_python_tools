@@ -110,7 +110,7 @@ class lmt_api():
             print('could find read file ', ik_file)
         return(ik_data)
 
-    def compute_lmt(self, tstart=None, tend=None):
+    def compute_lmt(self, tstart=None, tend=None, selected_muscles = None):
 
         # read ik files
         if self.ikdat is None:
@@ -123,7 +123,7 @@ class lmt_api():
         lmt_dat = []
         for ifile in range(0, self.nfiles):
             # get muscle tendon lengths
-            lmt = self.get_LMT_ifile(ifile, tstart=tstart, tend=tend)
+            lmt = self.get_LMT_ifile(ifile, tstart=tstart, tend=tend, selected_muscles = selected_muscles)
 
             # print to a csv file -- lmt
             outpath = self.outputdir
@@ -137,11 +137,19 @@ class lmt_api():
         return(lmt_dat)
 
 
-    def get_LMT_ifile(self, ifile, tstart = None, tend = None):
+    def get_LMT_ifile(self, ifile, tstart = None, tend = None, selected_muscles = None):
 
         # get time vector and number of frames.
         t = self.ikdat[ifile].time
         nfr = len(t)
+
+        # test if we want to compute for all muscles or only a subset
+        if selected_muscles is None:
+            nmuscles = self.nMuscles
+            muscle_names = self.muscle_names
+        else:
+            nmuscles = len(selected_muscles)
+            muscle_names = selected_muscles
 
         # init state of model
         s = self.model.initSystem()
@@ -169,7 +177,7 @@ class lmt_api():
             tend = t.iloc[-1]
         indices = np.where((t >= tstart) & (t <= tend))[0]
         # pre allocate output
-        lMT = np.zeros((len(indices), self.nMuscles))
+        lMT = np.zeros((len(indices), nmuscles))
 
         # loop over all frames
         cti = 0
@@ -182,8 +190,8 @@ class lmt_api():
             self.model.setStateVariableValues(s, state_vars)
             self.model.realizePosition(s)
             # loop over muscles to get muscle-tendon length
-            for m in range(0, self.nMuscles):
-                muscle_m = forceSet.get(self.muscle_names[m])
+            for m in range(0, nmuscles):
+                muscle_m = forceSet.get(muscle_names[m])
                 muscle_m = osim.Muscle.safeDownCast(muscle_m)
                 lMT[cti,m] = muscle_m.getLength(s)
                 # print current stage per 500 processed frames
@@ -195,7 +203,7 @@ class lmt_api():
         # return lmt as a dataframe
         data = np.concatenate(
             (np.expand_dims(t[indices], axis=1), lMT), axis=1)
-        columns = ['time'] + self.muscle_names
+        columns = ['time'] + muscle_names
         muscle_tendon_lengths = pd.DataFrame(data=data, columns=columns)
 
         return muscle_tendon_lengths

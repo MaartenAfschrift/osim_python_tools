@@ -114,6 +114,7 @@ class osim_subject:
         m_tot = np.nansum(m_bodies)
         return(m_tot, m_bodies, bodynames)
 
+
     # ----------------------------
     #           read files
     #----------------------------
@@ -279,7 +280,8 @@ class osim_subject:
                 self.id_dat.append(id_dat)
 
 
-    def compute_lmt(self, boolprint = True, tstart = None, tend = None):
+    def compute_lmt(self, boolprint = True, tstart = None, tend = None,
+                    selected_muscles = None):
 
         # read all ik file if needed
         if len(self.ikdat) == 0:
@@ -287,7 +289,7 @@ class osim_subject:
 
         # use lmt_api class to compute lmt in all ikfiles
         lmtobj = lmt_api(self.modelpath, self.ikfiles, self.lmt_folder, ikdat = self.ikdat)
-        self.lmt_dat = lmtobj.compute_lmt(tstart = tstart, tend = tend)
+        self.lmt_dat = lmtobj.compute_lmt(tstart = tstart, tend = tend, selected_muscles = selected_muscles)
 
 
     def compute_dM(self, boolprint = True, fastversion = True,
