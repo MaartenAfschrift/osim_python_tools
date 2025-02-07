@@ -278,15 +278,75 @@ class moment_arm_api():
     # the moment arms of a particular musclefor all dofs (e.g. we evaluate moment
     # arm of soleus round shoulder joint). We can reduce computation time by first
     # identifying the relevant dofs for each muscle
-    def identify_relevant_dofs_dM(self):
+    def identify_relevant_dofs_dM(self, selected_dofs = None, selected_muscles = None):
+
         # init state of model
         s = self.model.initSystem()
+        forceset = self.model.getMuscles()
+
+        # test if we have to loop over all dofs or only a subset
+        if selected_dofs is None:
+            selected_dofs = self.coord_names
+
+        # test if we want to compute for all muscles or only a subset
+        if selected_muscles is None:
+            muscle_names = self.muscle_names
+        else:
+            muscle_names = selected_muscles
+
+        # pre allocate self.dofs_dm
+        self.dofs_dm = {}
+        for dof in selected_dofs:
+            xvar = np.array([-0.5, 0, 0.5])  # vary states
+            lmt = np.zeros((len(xvar), len(muscle_names)))
+            for j in range(0, len(xvar)):
+                self.model.getCoordinateSet().get(dof).setValue(s, xvar[j])
+                self.model.realizePosition(s)
+                # loop over muscles to get muscle-tendon length
+                ctm = 0
+                for m in muscle_names:
+                    muscle_m = forceset.get(m)
+                    muscle_m = osim.Muscle.safeDownCast(muscle_m)
+                    lmt[j, ctm] = muscle_m.getLength(s)
+                    ctm = ctm + 1
+            # evaluate if moment arms changes for this change in dof
+            d_lmt = np.min(lmt, axis=0) - np.max(lmt, axis=0)
+            index_muscles = np.where(np.abs(d_lmt) > 0.0001)
+            self.dofs_dm[dof] = index_muscles[0]
+
+    # compute moment arms for all muscles and dofs
+    def get_dm_ifile(self, ifile, tstart = None, tend = None,
+                     selected_muscles = None, selected_dofs = None):
+
+        # get time vector and number of frames.
+        t = self.ikdat[ifile].time
+        nfr = len(t)
+        ikdat = self.ikdat[ifile]
+
+        # init state of model
+        s = self.model.initSystem()
+        forceset = self.model.getMuscles()
         state_vars = self.model.getStateVariableValues(s)
-        force_set = self.model.getMuscles()
-        state_vars.setToZero()
-        self.model.setStateVariableValues(s, state_vars)
-        self.model.realizePosition(s)
-        forceset = self.model.getForceSet()
+
+        # test if we have to loop over all dofs or only a subset
+        if selected_dofs is None:
+            selected_dofs = self.coord_names
+
+        # test if we want to compute for all muscles or only a subset
+        if selected_muscles is None:
+            nmuscles = self.nMuscles
+            muscle_names = self.muscle_names
+        else:
+            nmuscles = len(selected_muscles)
+            muscle_names = selected_muscles
+
+        # get all headers
+        self.dM_names = []
+        for dof in selected_dofs:
+            for m in muscle_names:
+                muscle_m = forceset.get(m)
+                self.dM_names.append(muscle_m.getName() + '_' +
+                                     self.model.getCoordinateSet().get(dof).getName())
 
         # get state variable names
         stateVariableNames = self.model.getStateVariableNames()
@@ -294,62 +354,9 @@ class moment_arm_api():
             stateVariableNames.get(i) for i in range(
                 stateVariableNames.getSize())]
 
-        # random states
+        # read the ik file as a time series
         [columnLabels, table] = self.read_ik_as_timeseries(self.ikfiles[0])
-
-        # loop over dofs
-        self.dofs_dm = {}
-        for i in range(0, len(columnLabels)):
-            xvar = np.array([-0.5, 0, 0.5])  # vary states
-            index = stateVariableNamesStr.index(columnLabels[i])
-            lmt = np.zeros((len(xvar), self.nMuscles))
-            for j in range(0, len(xvar)):
-                state_vars.set(index, xvar[j])
-                self.model.setStateVariableValues(s, state_vars)
-                self.model.realizePosition(s)
-                # loop over muscles to get muscle-tendon length
-                for m in range(0, self.nMuscles):
-                    muscle_m = forceset.get(self.muscle_names[m])
-                    muscle_m = osim.Muscle.safeDownCast(muscle_m)
-                    lmt[j, m] = muscle_m.getLength(s)
-            # evaluate if moment arms changes for this change in dof
-            d_lmt = np.min(lmt, axis=0) - np.max(lmt, axis=0)
-            index_muscles = np.where(np.abs(d_lmt) > 0.0001)
-            self.dofs_dm[columnLabels[i]] = index_muscles[0]
-
-    # compute moment arms for all muscles and dofs
-    def get_dm_ifile(self, ifile, tstart = None, tend = None):
-
-        # get time vector and number of frames.
-        t = self.ikdat[ifile].time
-        nfr = len(t)
-
-        # init state of model
-        s = self.model.initSystem()
-        state_vars = self.model.getStateVariableValues(s)
-        force_set = self.model.getMuscles()
-        state_vars.setToZero()
-        self.model.setStateVariableValues(s, state_vars)
-        self.model.realizePosition(s)
-        forceset = self.model.getForceSet()
-
-        # read ik as time_series
-        [columnLabels, table] = self.read_ik_as_timeseries(self.ikfiles[ifile])
-        qs = table.getMatrix().to_numpy()
-
-        # get state variable names
-        state_variable_names = self.model.getStateVariableNames()
-        state_variable_names_str = [
-            state_variable_names.get(i) for i in range(
-                state_variable_names.getSize())]
-
-        # get all headers
-        self.dM_names = []
-        for j in range(0, self.ncoord):
-            for m in range(0, self.nMuscles):
-                muscle_m = forceset.get(self.muscle_names[m])
-                self.dM_names.append(muscle_m.getName() + '_' +
-                                     self.model.getCoordinateSet().get(j).getName())
+        Qs = table.getMatrix().to_numpy()
 
         # select frames in time window
         if tstart is None:
@@ -358,30 +365,40 @@ class moment_arm_api():
             tend = t.iloc[-1]
         indices = np.where((t >= tstart) & (t <= tend))[0]
 
+        # get all headers
+        self.dM_names = []
+        for dof in selected_dofs:
+            for muscle in muscle_names:
+                muscle_m = forceset.get(muscle)
+                self.dM_names.append(muscle_m.getName() + '_' +
+                                     self.model.getCoordinateSet().get(dof).getName())
         # pre allocate output
-        dM = np.zeros((len(indices), self.nMuscles * self.ncoord))
+        dM = np.zeros((len(indices), nmuscles * len(selected_dofs)))
 
         # loop over all frames
         cti = 0
         for i in indices:
             # set state from current frame
             for j in range(0, len(columnLabels)):
-                index = state_variable_names_str.index(columnLabels[j])
-                state_vars.set(index, qs[i, j])
+                index = stateVariableNamesStr.index(columnLabels[j])
+                state_vars.set(index, Qs[i,j])
             self.model.setStateVariableValues(s, state_vars)
             self.model.realizePosition(s)
             # get relevant muscles for this coordinate
-            for j in range(0, self.ncoord):
-                # get relevant coordinates for this muscle
-                muscles_sel = self.dofs_dm[columnLabels[j]]
-                # loop over muscles to get the moment arm
-                for m in muscles_sel:
-                    muscle_m = forceset.get(self.muscle_names[m])
+            ctdof = -1
+            for dof in selected_dofs:
+                ctdof = ctdof + 1
+                # get relevant muscles for this dof
+                muscles_sel = self.dofs_dm[dof]
+                # loop over all relevant muscles to get the moment arm
+                for im in muscles_sel:
+                    muscle = muscle_names[im]
+                    muscle_m = forceset.get(muscle)
                     muscle_m = osim.Muscle.safeDownCast(muscle_m)
                     # compute moment arms for given state
                     # this step is computationally very expensive
-                    dM[cti, m + j * self.nMuscles] =\
-                        muscle_m.computeMomentArm(s, self.model.getCoordinateSet().get(j))
+                    dM[cti, im + ctdof * nmuscles] =\
+                        muscle_m.computeMomentArm(s, self.model.getCoordinateSet().get(dof))
             # print current stage per 500 processed frames
             if np.remainder(cti, 500) == 0:
                 print('computing moment arms: frame ' , i-indices[0] , '/' ,  len(indices))
@@ -396,11 +413,13 @@ class moment_arm_api():
 
         return moment_arms
 
-    def compute_dm(self, boolprint = True, tstart = None, tend = None):
+    def compute_dm(self, boolprint = True, tstart = None, tend = None,
+                   selected_muscles = None, selected_dofs = None):
 
         # find relevant dofs for each muscle in fast version
         if self.dofs_dm is None:
-            self.identify_relevant_dofs_dM()
+            self.identify_relevant_dofs_dM(selected_dofs = selected_dofs,
+                                           selected_muscles = selected_muscles)
 
         # read ik files
         if self.ikdat is None:
@@ -410,11 +429,13 @@ class moment_arm_api():
                 self.ikdat.append(ik_data)
 
 
-        # compute for each ik file the muscle tendon lengths
+        # compute for each ik file the moment arm
         self.dm_dat = []
         for ifile in range(0, self.nfiles):
             # get moment arms
-            moment_arm = self.get_dm_ifile(ifile, tstart = tstart, tend = tend)
+            moment_arm = self.get_dm_ifile(ifile, tstart = tstart, tend = tend,
+                                           selected_dofs = selected_dofs,
+                                           selected_muscles = selected_muscles)
 
             # print to a csv file -- lmt
             outpath =  self.outputdir

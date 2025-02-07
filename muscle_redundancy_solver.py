@@ -111,8 +111,9 @@ class muscle_redundancy_solver:
     def compute_lmt_dm(self):
         # use class to do this
         # ToDo: add utility to compute lmt and dM for subset of muscles
-        self.my_subject.compute_lmt(selected_muscles = None)
-        self.my_subject.compute_dM()
+        self.my_subject.compute_lmt(selected_muscles = self.muscles_selected)
+        self.my_subject.compute_dM(selected_muscles = self.muscles_selected,
+                                   selected_dofs = self.dofs)
 
     # get and set functions
     def set_dofs(self, dofs):
