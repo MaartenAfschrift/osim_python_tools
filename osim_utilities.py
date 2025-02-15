@@ -289,6 +289,7 @@ class osim_subject:
         self.dm_dat = dmobj.compute_dm(tstart = tstart, tend = tend,
                                        selected_muscles = selected_muscles,
                                        selected_dofs = selected_dofs)
+        self.dofs_dm = dmobj.dofs_dm
 
 
     # inverse kinematics using api

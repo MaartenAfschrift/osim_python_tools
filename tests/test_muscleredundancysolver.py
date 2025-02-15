@@ -27,9 +27,10 @@ print(muscles_sel) # just print to test if this works
 
 # test function to compute moment arms and muscle-tendon lengths for selected muscles and dofs
 my_mrs.compute_lmt_dm()
+my_mrs.filter_inputs()
 
 # test function to filter all inputs
-
+my_mrs.get_muscle_properties()
 
 
 

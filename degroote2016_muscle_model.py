@@ -92,7 +92,6 @@ class DeGrooteMuscle:
         return norm_fiber_velocity
 
 
-
     ## Computations
     def compute_fiber_length(self):
         # 'denormalizing lMtilde'
