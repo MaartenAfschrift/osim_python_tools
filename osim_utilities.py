@@ -273,7 +273,7 @@ class osim_subject:
         # use lmt_api class to compute lmt in all ikfiles
         lmtobj = lmt_api(self.modelpath, self.ikfiles, self.lmt_folder, ikdat = self.ikdat)
         self.lmt_dat = lmtobj.compute_lmt(tstart = tstart, tend = tend,
-                                          selected_muscles = None)
+                                          selected_muscles = selected_muscles)
 
 
     def compute_dM(self, boolprint = True, fastversion = True,

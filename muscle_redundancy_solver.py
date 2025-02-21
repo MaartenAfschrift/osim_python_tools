@@ -10,6 +10,12 @@ import numpy as np
 from pathlib import Path
 from degroote2016_muscle_model import DeGrooteMuscle
 
+# plot functions for debugging
+import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('Qt5Agg') # interactive backend for matplotlib figures
+
+
 # List of tools:
 # 0. tool for settings
 # 1. tool to select muscles in model (that span selected dofs)
@@ -110,14 +116,13 @@ class muscle_redundancy_solver:
         self.imuscles_selected = np.unique(np.concatenate(imuscles))
         self.muscles_selected = [self.muscle_names[i] for i in self.imuscles_selected]
         # default values for muscles
-        self.vmax = np.zeros([len(self.muscles_selected)])*10
-        self.Atendon = np.zeros([len(self.muscles_selected)])*35
+        self.vmax = np.zeros([len(self.muscles_selected)])+10
+        self.Atendon = np.zeros([len(self.muscles_selected)])+35
         self.get_muscle_properties()
         return(self.muscles_selected)
 
     def compute_lmt_dm(self):
-        # use class to do this
-        # ToDo: add utility to compute lmt and dM for subset of muscles
+        # use osim_subject class to do this
         self.my_subject.compute_lmt(selected_muscles = self.muscles_selected)
         self.my_subject.compute_dM(selected_muscles = self.muscles_selected,
                                    selected_dofs = self.dofs)
@@ -136,12 +141,13 @@ class muscle_redundancy_solver:
             self.dm_dat[itrial] = lowPassFilterDataFrame(self.dm_dat[itrial], cutoff_frequency, order)
 
     def init_muscle_model(self):
+        # init degroote2016 muscle model
         nmuscles = len(self.muscles_selected)
         self.degroote_muscles = []
         for m in range(nmuscles):
             self.degroote_muscles.append(DeGrooteMuscle(self.fisom_opt[m], self.lm_opt[m],
                                                         self.tendon_slack[m], self.alpha_opt[m],
-                                                        self.vmax[m], self.Atendon[m]))
+                                                        10, 35))
 
 
     def formulate_solve_ocp(self, dt = 0.01, t0 = None, tend = None):
@@ -151,12 +157,14 @@ class muscle_redundancy_solver:
         # init degroote muscles
         self.init_muscle_model()
 
+        # create casadi functions
+        muscle_dyn_func = self.casadi_func_muscle_dyn()
+
         # first version for a single trial
-        itrial = []
+        itrial = 0
         iddat = self.iddat[itrial]
         lmt_dat = self.lmt_dat[itrial]
         dm_dat = self.dm_dat[itrial]
-
 
         # Create a discrete time axis
         if t0 is None:
@@ -166,24 +174,23 @@ class muscle_redundancy_solver:
         t = np.arange(t0, tend, dt)
         N = len(t)
 
-        # ToDo: stopped here on 15/02/2025
         # interpolate moment arms and muscle-tendon lengths to the time axis (t)
-        # and identify dof spanned and muscle name for dm data
-        # selecting the correct dof and muscle for each column is not so easy to solve. This should probably
-        # be done when computing the muscle moment arm data
-        # solved: this is already done in:self.my_subject.dofs_dm
-        # note: first loop is over selected dofs and inner loop is over muscles
-
-        # we probably want a list with dms for each dof (with zeros for muscles that do not span the dof)
-        dm = np.zeros([len(dm_dat.columns)-1, N])
-        for i in range(1, len(dm_dat.columns)):
-            colheader = dm_dat.columns[i]
-            dm[i, :] = np.interp(t, dm_dat.time, dm_dat[dm_dat.columns[i]])
-        lmt = np.zeros([len(lmt_dat.columns)-1, N])
-        for i in range(1, len(lmt_dat.columns)):
-            lmt[i, :] = np.interp(t, lmt_dat.time, lmt_dat[lmt_dat.columns[i]])
-
-
+        # for moment arms create a matrix with moment arms for each dofs [nmuscles, N, ndof]
+        nmuscles = len(self.muscles_selected)
+        ndof = len(self.dofs)
+        dm = np.zeros([nmuscles, N, ndof])
+        for i in range(0, ndof):
+            muscle_inds = self.my_subject.dofs_dm[self.dofs[i]]
+            for j in muscle_inds:
+                dm_name = self.muscles_selected[j] + '_' + self.dofs[i]
+                dm[j, :, i] = np.interp(t, dm_dat.time, dm_dat[dm_name])
+        lmt = np.zeros([nmuscles, N])
+        for i in range(0, nmuscles):
+            lmt[i, :] = np.interp(t, lmt_dat.time, lmt_dat[lmt_dat.columns[i+1]])
+        # interpolate inverse dynamic moment
+        id = np.zeros([ndof, N])
+        for i in range(0, ndof):
+            id[i, :] = np.interp(t, iddat.time, iddat[self.dofs[i] + '_moment'])
 
         # model info
         nmuscles = len(self.muscles_selected)
@@ -194,21 +201,33 @@ class muscle_redundancy_solver:
         a = opti.variable(nmuscles, N)
         lm_tilde = opti.variable(nmuscles, N) # muscle fiber length / opt length
         vm_tilde = opti.variable(nmuscles, N) # time derivative of lm_tilde
+        tau_ideal_optvar = opti.variable(ndof, N) # ideal joint torque
+        tau_ideal = tau_ideal_optvar * 30000 # scaling factor
 
-        # bounds on optimization variables
-        opti.subject_to(0 <= e <= 1)
-        opti.subject_to(0 <= a <= 1)
-        opti.subject_to(0.2 <= lm_tilde <= 1.8)
-        opti.subject_to(-10 <= vm_tilde <= 10)
+        # lower bounds on optimization variables
+        opti.subject_to(0 < e[:])
+        opti.subject_to(0 < a[:])
+        opti.subject_to(0.1 < lm_tilde[:])
+        opti.subject_to(-10 < vm_tilde[:])
 
-        # initial guess
+        # upper bounds on optimization variables
+        opti.subject_to(e[:] < 0.2)
+        opti.subject_to(a[:] < 0.2)
+        opti.subject_to(lm_tilde[:] < 1.7)
+        opti.subject_to(vm_tilde[:] < 10)
+
+        # initial guess (in future based on static optimization solution)
+        opti.set_initial(e[:], 0.1)
+        opti.set_initial(a[:], 0.1)
+        opti.set_initial(lm_tilde[:], 1)
+        opti.set_initial(vm_tilde[:], 0)
 
         # activation dynamics
         tact = 0.015
         tdeact = 0.06
         b = 0.1
         dadt_mx = ca.MX(nmuscles, N)
-        for k in range(1, N):
+        for k in range(0, N):
             dadt_mx[:,k] = self.activation_dynamics_degroote2016(e[:, k], a[:, k], tact, tdeact, b)
 
         # trapezoidal integration
@@ -219,19 +238,47 @@ class muscle_redundancy_solver:
 
         # muscle dynamics as a constraint
         muscle_dyn_constr = ca.MX(nmuscles, N)
-        for k in range(1, N):
-            for m in range(nmuscles):
-                # set muscle state
-                msel = self.degroote_muscles[m]
-                msel.set_activation(a[m, k])
-                msel.set_norm_fiber_length(lm_tilde[m, k])
-                msel.set_norm_fiber_velocity(vm_tilde[m, k])
-                msel.set_muscle_tendon_length(lmt[m, k])
-                muscle_dyn_constr[m, k] = msel.compute_hill_equilibrium(lm_tilde[m, k], vm_tilde[m, k], a[m, k])
+        muscle_torque = ca.MX(ndof, N)
+        Ftendon = ca.MX(nmuscles, N)
+        for k in range(0, N):
+            muscle_dyn_constr[:, k], muscle_torque[:, k], Ftendon[:,k] = (
+                muscle_dyn_func(a[:, k], lm_tilde[:, k],vm_tilde[:, k], lmt[:, k], dm[:, k, :]))
+        moment_constr = (muscle_torque + tau_ideal)- id
+        # add constraints
+        opti.subject_to(muscle_dyn_constr == 0)
+        opti.subject_to(moment_constr == 0)
+
+        # objective function
+        J = (ca.sumsqr(e)/N/nmuscles + ca.sumsqr(a)/N/nmuscles + ca.sumsqr(tau_ideal_optvar)/N/ndof +
+             0.01*ca.sumsqr(vm_tilde))
+        opti.minimize(J)
+
+        p_opts = {"expand": True}
+        s_opts = {"max_iter": 1000, "tol": 1e-6, "linear_solver": "mumps",
+                  "nlp_scaling_method": "gradient-based"}
+        opti.solver("ipopt", p_opts, s_opts)
+        sol = opti.solve()
+
+
+        self.solution = {"t": t,
+                         "e": sol.value(e),
+                         "a": sol.value(a),
+                         "lm_tilde": sol.value(lm_tilde),
+                         "vm_tilde": sol.value(vm_tilde),
+                         "muscle_dyn_constr": sol.value(muscle_dyn_constr),
+                         "muscle_torque": sol.value(muscle_torque),
+                         "tau_ideal": sol.value(tau_ideal),
+                         "Ftendon": sol.value(Ftendon),
+                         "moment_arm": dm,
+                         "lmt": lmt,
+                         "J": sol.value(J),
+                         "id": id}
+        return self.solution
 
 
 
-    def trapezoidal_intergrator(x, x1, xd, xd1, dt):
+
+    def trapezoidal_intergrator(self,x, x1, xd, xd1, dt):
         error = (x1 - x) - (0.5 * dt * (xd + xd1))
         return error
 
@@ -272,6 +319,82 @@ class muscle_redundancy_solver:
     def set_muscles(self, muscles_selected):
         # manually select muscles
         self.muscles_selected = muscles_selected
+
+    #------------------------
+    # create casadi functions
+    #------------------------
+
+    def casadi_func_muscle_dyn(self):
+
+        nmuscles = len(self.muscles_selected)
+        ndof = len(self.dofs)
+
+        # create symbolic variables for inputs
+        a = ca.MX.sym('a', nmuscles)
+        lm_tilde = ca.MX.sym('lm_tilde', nmuscles)
+        vm_tilde = ca.MX.sym('vm_tilde', nmuscles)
+        lmt = ca.MX.sym('lmt', nmuscles)
+        dm = ca.MX.sym('dm', nmuscles,ndof)
+
+        # pre-allocate outputs
+        muscle_dyn_constr = ca.MX.zeros(nmuscles)
+        joint_torque_muscles = ca.MX.zeros(ndof)
+        Ftendon = ca.MX.zeros(nmuscles)
+
+        # loop over muscles
+        tau_joint_muscles = ca.MX.zeros(ndof)
+        for m in range(nmuscles):
+            # set muscle state
+            msel = self.degroote_muscles[m]
+            msel.set_activation(a[m])
+            msel.set_norm_fiber_length(lm_tilde[m])
+            msel.set_norm_fiber_length_dot(vm_tilde[m])
+            msel.set_muscle_tendon_length(lmt[m])
+            muscle_dyn_constr[m] = msel.compute_hill_equilibrium()
+            # compute joint torques
+            Fmuscle = msel.get_tendon_force()
+            for dof in range(ndof):
+                tau_joint_muscles[dof] = tau_joint_muscles[dof] + Fmuscle * dm[m, dof]
+            Ftendon[m] = Fmuscle
+        # constraint ID torque equals sum of muscle torques
+        for dof in range(ndof):
+            joint_torque_muscles[dof] = tau_joint_muscles[dof]
+
+        # create casadi function
+        muscle_dyn_func = ca.Function('muscle_dyn_func', [a, lm_tilde, vm_tilde, lmt, dm],
+                                      [muscle_dyn_constr, joint_torque_muscles, Ftendon],
+                                      ['a', 'lm_tilde','vm_tilde', 'lmt', 'dm'],
+                                      ['muscle_dyn_constr', 'joint_torque_muscles', 'Ftendon'])
+
+        return muscle_dyn_func
+
+
+    def debug_lmt(self):
+        # we want to check here if lm_tilde is reasonable given the lmt and dm values
+        # we can do this by plotting the muscle-tendon length and moment arms for a muscle
+        nmuscles = len(self.muscles_selected)
+        lmt_dat = self.lmt_dat[0]
+        lmt = np.zeros([nmuscles, len(lmt_dat.time)])
+        for i in range(0, nmuscles):
+            lmt[i, :] = lmt_dat[lmt_dat.columns[i+1]]
+
+
+        plt.figure()
+        ctm = -1
+        for m in self.muscles_selected:
+            ctm = ctm + 1
+            dl = (lmt[ctm,:] - self.tendon_slack[ctm])/self.lm_opt[ctm]
+            plt.plot(lmt_dat.time,dl, label = m)
+        plt.xlabel('time [s]')
+        plt.ylabel('lm_tilde rigid tendon')
+        plt.legend()
+        #plt.show()
+
+
+        print('test')
+
+
+
 
 
 
