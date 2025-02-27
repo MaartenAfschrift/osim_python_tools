@@ -169,8 +169,15 @@ class muscle_redundancy_solver:
         # Create a discrete time axis
         if t0 is None:
             t0 = iddat.time.iloc[0]
+        else:
+            if t0 < iddat.time.iloc[0]:
+                t0 = iddat.time.iloc[0]
+
         if tend is None:
             tend = iddat.time.iloc[-1]
+        else:
+            if tend > iddat.time.iloc[-1]:
+                tend = iddat.time.iloc[-1]
         t = np.arange(t0, tend, dt)
         N = len(t)
 
@@ -202,17 +209,17 @@ class muscle_redundancy_solver:
         lm_tilde = opti.variable(nmuscles, N) # muscle fiber length / opt length
         vm_tilde = opti.variable(nmuscles, N) # time derivative of lm_tilde
         tau_ideal_optvar = opti.variable(ndof, N) # ideal joint torque
-        tau_ideal = tau_ideal_optvar * 30000 # scaling factor
+        tau_ideal = tau_ideal_optvar # scaling factor
 
         # lower bounds on optimization variables
         opti.subject_to(0 < e[:])
         opti.subject_to(0 < a[:])
-        opti.subject_to(0.1 < lm_tilde[:])
+        opti.subject_to(0.2 < lm_tilde[:])
         opti.subject_to(-10 < vm_tilde[:])
 
         # upper bounds on optimization variables
-        opti.subject_to(e[:] < 0.2)
-        opti.subject_to(a[:] < 0.2)
+        opti.subject_to(e[:] < 1)
+        opti.subject_to(a[:] < 1)
         opti.subject_to(lm_tilde[:] < 1.7)
         opti.subject_to(vm_tilde[:] < 10)
 
@@ -225,7 +232,8 @@ class muscle_redundancy_solver:
         # activation dynamics
         tact = 0.015
         tdeact = 0.06
-        b = 0.1
+        #b = 0.1
+        b = 0.01
         dadt_mx = ca.MX(nmuscles, N)
         for k in range(0, N):
             dadt_mx[:,k] = self.activation_dynamics_degroote2016(e[:, k], a[:, k], tact, tdeact, b)
@@ -249,12 +257,15 @@ class muscle_redundancy_solver:
         opti.subject_to(moment_constr == 0)
 
         # objective function
-        J = (ca.sumsqr(e)/N/nmuscles + ca.sumsqr(a)/N/nmuscles + ca.sumsqr(tau_ideal_optvar)/N/ndof +
-             0.01*ca.sumsqr(vm_tilde))
-        opti.minimize(J)
+        J = (ca.sumsqr(e)/N/nmuscles +
+             ca.sumsqr(a)/N/nmuscles +
+             0.1*ca.sumsqr(tau_ideal_optvar)/N/ndof +
+             0.01 * ca.sumsqr(vm_tilde)/N/nmuscles)
+        opti.minimize(J*10)
 
         p_opts = {"expand": True}
-        s_opts = {"max_iter": 1000, "tol": 1e-6, "linear_solver": "mumps",
+        #p_opts = {}
+        s_opts = {"max_iter": 1000, "tol": 1e-5, "linear_solver": "mumps",
                   "nlp_scaling_method": "gradient-based"}
         opti.solver("ipopt", p_opts, s_opts)
         sol = opti.solve()

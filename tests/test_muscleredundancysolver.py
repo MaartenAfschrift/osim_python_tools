@@ -16,23 +16,23 @@ idfile = os.path.join(mainpath,'data','Walking_ID.sto')
 # currently debugging case with knee angle. there is clearly something wrong here
 #   - maybe passive forces ?
 
-
 # create muscle redundancy solver object
 my_mrs = muscle_redundancy_solver(osim_model_path, ikfile, idfile)
 
 # set dofs
-#dofs =['hip_flexion_r','knee_angle_r' ,'ankle_angle_r']
+dofs =['hip_flexion_r','knee_angle_r' ,'ankle_angle_r']
 #dofs =['knee_angle_r' ,'ankle_angle_r']
 #dofs = ["ankle_angle_r"]
-dofs = ["knee_angle_r"]
+#dofs = ["knee_angle_r"]
 my_mrs.set_dofs(dofs)
 
 # identify muscles for selected dofs
 muscles_sel = my_mrs.identify_muscles()
-print(muscles_sel) # just print to test if this works
 
 # set muscles
 #muscles = ['soleus_r','tib_ant_r']
+#muscles = ['bifemsh_r','vas_med_r', 'vas_int_r', 'vas_lat_r','med_gas_r']
+#muscles = ['vas_med_r', 'vas_int_r']
 #my_mrs.set_muscles(muscles)
 
 # test function to compute moment arms and muscle-tendon lengths for selected muscles and dofs
@@ -46,7 +46,7 @@ my_mrs.get_muscle_properties()
 my_mrs.debug_lmt()
 
 # test formulate and solve ocp
-my_mrs.formulate_solve_ocp()
+my_mrs.formulate_solve_ocp(dt = 0.01, t0 = 0.01,tend = 1 )
 
 # plot optimal solution
 plt.figure()
@@ -98,9 +98,9 @@ else:
     for d in my_mrs.dofs:
         ctdof = ctdof + 1
         plt.subplot(1, ndofs, ctdof+1)
-        plt.plot(my_mrs.solution['t'], my_mrs.solution['muscle_torque'][d,:],label="muscles")
-        plt.plot(my_mrs.solution['t'],my_mrs.solution['tau_ideal'][d,:],label='torque actuator')
-        plt.plot(my_mrs.solution['t'],my_mrs.solution['id'][d,:],label='torque')
+        plt.plot(my_mrs.solution['t'], my_mrs.solution['muscle_torque'][ctdof,:],label="muscles")
+        plt.plot(my_mrs.solution['t'],my_mrs.solution['tau_ideal'][ctdof,:],label='torque actuator')
+        plt.plot(my_mrs.solution['t'],my_mrs.solution['id'][ctdof,:],label='torque')
         plt.xlabel('time [s]')
         plt.ylabel('torque')
     plt.legend()
