@@ -20,9 +20,9 @@ idfile = os.path.join(mainpath,'data','Walking_ID.sto')
 my_mrs = muscle_redundancy_solver(osim_model_path, ikfile, idfile)
 
 # set dofs
-#dofs =['hip_flexion_r','knee_angle_r' ,'ankle_angle_r']
+dofs =['hip_flexion_r','knee_angle_r' ,'ankle_angle_r','hip_adduction_r','hip_rotation_r']
 #dofs =['knee_angle_r' ,'ankle_angle_r']
-dofs = ["ankle_angle_r"]
+#dofs = ["ankle_angle_r"]
 #dofs = ["knee_angle_r"]
 my_mrs.set_dofs(dofs)
 
@@ -37,7 +37,7 @@ muscles_sel = my_mrs.identify_muscles()
 
 # test function to compute moment arms and muscle-tendon lengths for selected muscles and dofs
 my_mrs.compute_lmt_dm()
-my_mrs.filter_inputs(cutoff_frequency=4)
+my_mrs.filter_inputs(cutoff_frequency=6)
 
 # test function to get muscle properties
 my_mrs.get_muscle_properties()
@@ -46,7 +46,7 @@ my_mrs.get_muscle_properties()
 my_mrs.debug_lmt()
 
 # test formulate and solve ocp
-my_mrs.formulate_solve_ocp(dt = 0.01, t0 = 0.01,tend = 1.9 )
+my_mrs.formulate_solve_ocp(dt = 0.01, t0 = 0.6,tend = 1.9 )
 
 # plot optimal solution
 plt.figure()

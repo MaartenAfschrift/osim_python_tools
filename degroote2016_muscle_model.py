@@ -399,6 +399,9 @@ class DeGrooteMuscle:
     def get_tendon_force(self):
         return self.tendon_force
 
+    def get_norm_fiber_velocity(self):
+        return self.norm_fiber_velocity
+
 
 
 

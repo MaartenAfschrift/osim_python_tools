@@ -210,7 +210,6 @@ class muscle_redundancy_solver:
             self.static_optimization(t, lmt, vmt, dm, id)
 
 
-
         # model info
         nmuscles = len(self.muscles_selected)
 
@@ -236,16 +235,22 @@ class muscle_redundancy_solver:
         opti.subject_to(vm_tilde[:] < 10)
 
         # initial guess (in future based on static optimization solution)
-        opti.set_initial(e[:], 0.1)
-        opti.set_initial(a[:], 0.1)
-        opti.set_initial(lm_tilde[:], 1)
-        opti.set_initial(vm_tilde[:], 0)
+        if bool_static_opt:
+            opti.set_initial(e, self.sol_static_opt['a'])
+            opti.set_initial(a, self.sol_static_opt['a'])
+            opti.set_initial(lm_tilde, self.sol_static_opt['lm_tilde'])
+            opti.set_initial(vm_tilde,self.sol_static_opt['vm_tilde'] )
+        else:
+            opti.set_initial(e[:], 0.1)
+            opti.set_initial(a[:], 0.1)
+            opti.set_initial(lm_tilde[:], 1)
+            opti.set_initial(vm_tilde[:], 0)
 
         # activation dynamics
         tact = 0.015
         tdeact = 0.06
         #b = 0.1
-        b = 0.01
+        b = 0.1
         dadt_mx = ca.MX(nmuscles, N)
         for k in range(0, N):
             dadt_mx[:,k] = self.activation_dynamics_degroote2016(e[:, k], a[:, k], tact, tdeact, b)
@@ -297,8 +302,6 @@ class muscle_redundancy_solver:
                          "J": sol.value(J),
                          "id": id}
         return self.solution
-
-
 
 
     def trapezoidal_intergrator(self,x, x1, xd, xd1, dt):
@@ -363,13 +366,15 @@ class muscle_redundancy_solver:
         # muscle forces
         tau_joint_muscles = ca.MX.zeros(ndof,N)
         lm_tilde_mat = ca.MX.zeros(nmuscles, N)
+        vm_tilde_mat = ca.MX.zeros(nmuscles, N)
         for m in range(len(self.muscles_selected)):
             msel = self.degroote_muscles[m]
             lmt_sel = lmt[m,:]
             vmt_sel = vmt[m,:]
             a_sel = a[m,:].T
             Fmuscle = msel.compute_muscle_force_rigid_tendon(lmt[m,:], vmt[m,:], a[m,:].T)
-            lm_tilde_mat[m, :]= msel.get_norm_fiber_length()
+            lm_tilde_mat[m, :] = msel.get_norm_fiber_length()
+            vm_tilde_mat[m, :] = msel.get_norm_fiber_velocity()
             for dof in range(ndof):
                 dm_sel = dm[m, :, dof]
                 tau_joint_muscles[dof, :] = tau_joint_muscles[dof, :] + (Fmuscle * dm_sel).T
@@ -387,21 +392,13 @@ class muscle_redundancy_solver:
         opti.solver("ipopt", p_opts, s_opts)
         sol = opti.solve()
 
-        #unpack solution
+        # unpack solution
         self.sol_static_opt = {"a": sol.value(a),
                                "topt": sol.value(topt),
                                "lm_tilde": sol.value(lm_tilde_mat),
-                               "t": t}
-
-
-
-
-
-
-
-
-
-        print('todo')
+                               "t": t,
+                               "vm_tilde": sol.value(vm_tilde_mat)}
+        return(self.sol_static_opt)
 
     #------------------------
     # create casadi functions
