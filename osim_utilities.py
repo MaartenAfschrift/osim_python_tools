@@ -278,7 +278,8 @@ class osim_subject:
 
     def compute_dM(self, boolprint = True, fastversion = True,
                    tstart = None, tend = None, selected_muscles = None,
-                   selected_dofs = None):
+                   selected_dofs = None, limitfilesize = True):
+      
         # read all ik file if needed
         if len(self.ikdat) == 0:
             self.read_ikfiles()
@@ -288,9 +289,9 @@ class osim_subject:
                                ikdat = self.ikdat)
         self.dm_dat = dmobj.compute_dm(tstart = tstart, tend = tend,
                                        selected_muscles = selected_muscles,
-                                       selected_dofs = selected_dofs)
-        self.dofs_dm = dmobj.dofs_dm
-
+                                       selected_dofs = selected_dofs,
+                                       limitfilesize = limitfilesize)
+        
 
     # inverse kinematics using api
     def compute_inverse_kinematics(self, boolRead = True, overwrite = False):

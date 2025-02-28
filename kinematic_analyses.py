@@ -173,8 +173,14 @@ class lmt_api():
         # select frames in time window
         if tstart is None:
             tstart = t.iloc[0]
+        else:
+            if tstart < t.iloc[0]:
+                tstart = t.iloc[0]
+
         if tend is None:
             tend = t.iloc[-1]
+            if tend > t.iloc[-1]:
+                tend = t.iloc[-1]
         indices = np.where((t >= tstart) & (t <= tend))[0]
         # pre allocate output
         lMT = np.zeros((len(indices), nmuscles))
@@ -278,7 +284,19 @@ class moment_arm_api():
     # the moment arms of a particular musclefor all dofs (e.g. we evaluate moment
     # arm of soleus round shoulder joint). We can reduce computation time by first
     # identifying the relevant dofs for each muscle
+
     def identify_relevant_dofs_dM(self, selected_dofs = None, selected_muscles = None):
+        # selected muscles
+        if selected_muscles is None:
+            selected_muscles = self.muscle_names
+        nmuscles = len(selected_muscles)
+
+        # find index of selected muscles
+        index_muscles = np.zeros(nmuscles, dtype = int)
+        ct = 0
+        for m in selected_muscles:
+            index_muscles[ct] = int(self.muscle_names.index(m))
+            ct =ct + 1
 
         # init state of model
         s = self.model.initSystem()
@@ -303,20 +321,22 @@ class moment_arm_api():
                 self.model.getCoordinateSet().get(dof).setValue(s, xvar[j])
                 self.model.realizePosition(s)
                 # loop over muscles to get muscle-tendon length
-                ctm = 0
-                for m in muscle_names:
-                    muscle_m = forceset.get(m)
+                for m in range(0, nmuscles):
+                    muscle_m = forceset.get(selected_muscles[m])
                     muscle_m = osim.Muscle.safeDownCast(muscle_m)
                     lmt[j, ctm] = muscle_m.getLength(s)
                     ctm = ctm + 1
             # evaluate if moment arms changes for this change in dof
             d_lmt = np.min(lmt, axis=0) - np.max(lmt, axis=0)
-            index_muscles = np.where(np.abs(d_lmt) > 0.0001)
-            self.dofs_dm[dof] = index_muscles[0]
+            index_sel = np.where(np.abs(d_lmt) > 0.0001)
+            if len(index_sel[0]) > 0:
+                self.dofs_dm[columnLabels[i]] = index_muscles[index_sel[0]]
+            else:
+                self.dofs_dm[columnLabels[i]] = []
 
     # compute moment arms for all muscles and dofs
-    def get_dm_ifile(self, ifile, tstart = None, tend = None,
-                     selected_muscles = None, selected_dofs = None):
+    def get_dm_ifile(self, ifile, tstart = None, tend = None, limitfilesize = True,
+                    selected_muscles = None, selected_dofs = None):            
 
         # get time vector and number of frames.
         t = self.ikdat[ifile].time
@@ -342,11 +362,21 @@ class moment_arm_api():
 
         # get all headers
         self.dM_names = []
-        for dof in selected_dofs:
-            for m in muscle_names:
-                muscle_m = forceset.get(m)
-                self.dM_names.append(muscle_m.getName() + '_' +
-                                     self.model.getCoordinateSet().get(dof).getName())
+        if limitfilesize:
+            ct_dof = -1
+            for dof in self.dofs_dm:
+                ct_dof = ct_dof + 1
+                if len(self.dofs_dm[dof])>0:
+                    for m in self.dofs_dm[dof]:
+                        muscle_m = forceset.get(self.muscle_names[m])
+                        self.dM_names.append(muscle_m.getName() + '_' +
+                                             self.model.getCoordinateSet().get(ct_dof).getName())
+        else:
+            for j in range(0, self.ncoord):
+                for m in range(0, self.nMuscles):
+                    muscle_m = forceset.get(self.muscle_names[m])
+                    self.dM_names.append(muscle_m.getName() + '_' +
+                                         self.model.getCoordinateSet().get(j).getName())
 
         # get state variable names
         stateVariableNames = self.model.getStateVariableNames()
@@ -361,24 +391,29 @@ class moment_arm_api():
         # select frames in time window
         if tstart is None:
             tstart = t.iloc[0]
+        else:
+            if tstart < t.iloc[0]:
+                tstart = t.iloc[0]
+
         if tend is None:
             tend = t.iloc[-1]
-        indices = np.where((t >= tstart) & (t <= tend))[0]
+        else:
+            if tend > t.iloc[-1]:
+                tend = t.iloc[-1]
 
-        # get all headers
-        self.dM_names = []
-        for dof in selected_dofs:
-            for muscle in muscle_names:
-                muscle_m = forceset.get(muscle)
-                self.dM_names.append(muscle_m.getName() + '_' +
-                                     self.model.getCoordinateSet().get(dof).getName())
-        # pre allocate output
-        dM = np.zeros((len(indices), nmuscles * len(selected_dofs)))
+        indices = np.where((t >= tstart) & (t <= tend))[0]
+        
+        # pre allocate output [all these zeros needed ?, for not relevant muscles as well ?]
+        if limitfilesize:
+            dM = np.zeros((len(indices), len(self.dM_names)))
+        else:
+            dM = np.zeros((len(indices), self.nMuscles * self.ncoord))
 
         # loop over all frames
         cti = 0
         for i in indices:
             # set state from current frame
+            ct_col = 0
             for j in range(0, len(columnLabels)):
                 index = stateVariableNamesStr.index(columnLabels[j])
                 state_vars.set(index, Qs[i,j])
@@ -397,8 +432,13 @@ class moment_arm_api():
                     muscle_m = osim.Muscle.safeDownCast(muscle_m)
                     # compute moment arms for given state
                     # this step is computationally very expensive
-                    dM[cti, im + ctdof * nmuscles] =\
-                        muscle_m.computeMomentArm(s, self.model.getCoordinateSet().get(dof))
+                    if limitfilesize:
+                        dM[cti, ct_col] = muscle_m.computeMomentArm(s, self.model.getCoordinateSet().get(j))
+                        ct_col = ct_col + 1
+                    else:
+                        dM[cti, m + j * self.nMuscles] =\
+                            muscle_m.computeMomentArm(s, self.model.getCoordinateSet().get(j))
+
             # print current stage per 500 processed frames
             if np.remainder(cti, 500) == 0:
                 print('computing moment arms: frame ' , i-indices[0] , '/' ,  len(indices))
@@ -413,10 +453,14 @@ class moment_arm_api():
 
         return moment_arms
 
-    def compute_dm(self, boolprint = True, tstart = None, tend = None,
-                   selected_muscles = None, selected_dofs = None):
+
+    def compute_dm(self, boolprint = True, tstart = None, tend = None, selected_muscles = None,
+                   limitfilesize = True, selected_dofs = None):
 
         # find relevant dofs for each muscle in fast version
+        if selected_muscles is None:
+            selected_muscles = self.muscle_names
+
         if self.dofs_dm is None:
             self.identify_relevant_dofs_dM(selected_dofs = selected_dofs,
                                            selected_muscles = selected_muscles)
@@ -428,15 +472,12 @@ class moment_arm_api():
                 ik_data = self.read_ik(ikfile)
                 self.ikdat.append(ik_data)
 
-
-        # compute for each ik file the moment arm
         self.dm_dat = []
         for ifile in range(0, self.nfiles):
             # get moment arms
             moment_arm = self.get_dm_ifile(ifile, tstart = tstart, tend = tend,
-                                           selected_dofs = selected_dofs,
-                                           selected_muscles = selected_muscles)
-
+                                           selected_muscles = selected_muscles,
+                                          limitfilesize= limitfilesize)
             # print to a csv file -- lmt
             outpath =  self.outputdir
             if not os.path.exists(outpath ):
