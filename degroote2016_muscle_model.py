@@ -44,8 +44,8 @@ class DeGrooteMuscle:
         self.norm_fiber_force = None
         self.passive_fiber_force = None
         self.active_fiber_force = None
-        self.norm_fiber_velocity = None
-        self.norm_fiber_length_dot = None
+        self.norm_fiber_velocity = None # [/lmtopt/vmax]
+        self.norm_fiber_length_dot = None # time derivative of normalized fiber length [/lmopt]
         self.norm_fiber_length = None
         self.velocity_force = None
         self.active_fiber_force_denorm = None
@@ -80,6 +80,21 @@ class DeGrooteMuscle:
                                      np.sqrt((d2 * norm_fiber_velocity + d3) ** 2 + 1)) + d4
 
         return velocity_force
+    @staticmethod
+    def force_length_fiber(norm_fiber_length):
+        b1i = np.array([0.815, 0.433, 0.100])
+        b2i = np.array([1.055, 0.717, 1.000])
+        b3i = np.array([0.162, -0.030, 0.354])
+        b4i = np.array([0.063, 0.200, 0.000])
+
+        fact = 0
+
+        for ii in range(3):
+            fact_tmp = b1i[ii] * np.exp((-0.5 * (norm_fiber_length - b2i[ii]) ** 2) /
+                                        (b3i[ii] + b4i[ii] * norm_fiber_length) ** 2)
+            fact += fact_tmp
+        return(fact)
+
 
     @staticmethod
     def inverse_force_velocity(velocity_force):
@@ -90,7 +105,6 @@ class DeGrooteMuscle:
         d4 = 0.886
         norm_fiber_velocity = (np.sinh((velocity_force - d4) / d1) - d3) / d2
         return norm_fiber_velocity
-
 
 
     ## Computations
@@ -165,19 +179,7 @@ class DeGrooteMuscle:
         self.passive_fiber_force = ((t5 - 0.10e1) + 0.995172050006169) / 53.598150033144236
 
     def compute_force_length(self):
-        # Equation S2: (force-length contractile element ?)
-        b1i = np.array([0.815, 0.433, 0.100])
-        b2i = np.array([1.055, 0.717, 1.000])
-        b3i = np.array([0.162, -0.030, 0.354])
-        b4i = np.array([0.063, 0.200, 0.000])
-
-        fact = 0
-
-        for ii in range(3):
-            fact_tmp = b1i[ii] * np.exp((-0.5 * (self.norm_fiber_length - b2i[ii]) ** 2) /
-                                        (b3i[ii] + b4i[ii] * self.norm_fiber_length) ** 2)
-            fact += fact_tmp
-
+        fact = self.force_length_fiber(self.norm_fiber_length)
         self.active_fiber_force = fact
         self.active_fiber_force_denorm = fact * self.activation * self.maximal_isometric_force
         return self.active_fiber_force, self.active_fiber_force_denorm
@@ -194,8 +196,6 @@ class DeGrooteMuscle:
         self.norm_fiber_velocity = self.inverse_force_velocity(fm_vtilde)
 
     ## Implicit formulation (formulation 4 of DeGroote2016)
-
-
     def compute_velocity_force(self):
         # Equation S4:
         self.velocity_force = self.force_velocity(self.norm_fiber_velocity)
@@ -255,6 +255,23 @@ class DeGrooteMuscle:
                           (self.activation * self.active_fiber_force * self.velocity_force + self.passive_fiber_force) \
                           - self.tendon_force
         return hill_equilibrium
+
+    def compute_muscle_force_rigid_tendon(self, lMt, vMt, activation):
+        # fiber length and velocity are inputs
+        lm_x = lMt- self.tendon_slack_length
+        fiber_width = self.optimal_fiber_length * np.sin(self.optimal_pennation_angle)
+        fiber_length = np.sqrt(lm_x ** 2 + fiber_width ** 2)
+        self.norm_fiber_length = fiber_length / self.optimal_fiber_length
+        self.norm_fiber_velocity = vMt / self.maximal_fiber_velocity / self.optimal_fiber_length
+        self.compute_force_length()
+        self.compute_velocity_force()
+        self.compute_passive_fiber_force()
+        # compute muscle force
+        cosalpha = lm_x / fiber_length
+        Fmuscle = (self.maximal_isometric_force * cosalpha *
+                   (activation * self.active_fiber_force * self.velocity_force + self.passive_fiber_force))
+        return(Fmuscle)
+
 
     #---------------------------------
     #       Plot functionalities
@@ -381,6 +398,9 @@ class DeGrooteMuscle:
 
     def get_tendon_force(self):
         return self.tendon_force
+
+    def get_norm_fiber_velocity(self):
+        return self.norm_fiber_velocity
 
 
 

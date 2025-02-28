@@ -272,12 +272,14 @@ class osim_subject:
 
         # use lmt_api class to compute lmt in all ikfiles
         lmtobj = lmt_api(self.modelpath, self.ikfiles, self.lmt_folder, ikdat = self.ikdat)
-        self.lmt_dat = lmtobj.compute_lmt(tstart = tstart, tend = tend, selected_muscles = selected_muscles)
+        self.lmt_dat = lmtobj.compute_lmt(tstart = tstart, tend = tend,
+                                          selected_muscles = selected_muscles)
 
 
     def compute_dM(self, boolprint = True, fastversion = True,
                    tstart = None, tend = None, selected_muscles = None,
-                   limitfilesize = True):
+                   selected_dofs = None, limitfilesize = True):
+      
         # read all ik file if needed
         if len(self.ikdat) == 0:
             self.read_ikfiles()
@@ -286,9 +288,10 @@ class osim_subject:
         dmobj = moment_arm_api(self.modelpath, self.ikfiles, self.moment_arm_folder,
                                ikdat = self.ikdat)
         self.dm_dat = dmobj.compute_dm(tstart = tstart, tend = tend,
-                                       selected_muscles= selected_muscles,
+                                       selected_muscles = selected_muscles,
+                                       selected_dofs = selected_dofs,
                                        limitfilesize = limitfilesize)
-
+        
 
     # inverse kinematics using api
     def compute_inverse_kinematics(self, boolRead = True, overwrite = False):

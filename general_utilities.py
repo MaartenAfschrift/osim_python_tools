@@ -12,6 +12,13 @@ def lowPassFilter(time, data, lowpass_cutoff_frequency, order=4):
 
     return dataFilt
 
+def lowPassFilterDataFrame(data, lowpass_cutoff_frequency, order=4):
+    time = data.iloc[:, 0]
+    data = data.iloc[:, 1:]
+    dataFilt = lowPassFilter(time, data, lowpass_cutoff_frequency, order)
+    dataFilt = pd.DataFrame(dataFilt, columns=data.columns)
+    # return dataframe with time vector
+    return pd.concat([time, dataFilt], axis=1)
 
 def readMotionFile(filename):
     """ Reads OpenSim .mot and .sto files.
