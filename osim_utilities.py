@@ -291,6 +291,7 @@ class osim_subject:
                                        selected_muscles = selected_muscles,
                                        selected_dofs = selected_dofs,
                                        limitfilesize = limitfilesize)
+        self.dofs_dm = dmobj.dofs_dm
         
 
     # inverse kinematics using api
