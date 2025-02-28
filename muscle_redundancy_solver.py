@@ -150,7 +150,7 @@ class muscle_redundancy_solver:
                                                         10, 35))
 
 
-    def formulate_solve_ocp(self, dt = 0.01, t0 = None, tend = None):
+    def formulate_solve_ocp(self, dt = 0.01, t0 = None, tend = None, bool_static_opt = True):
         # formulate optimal control problem
         # this is the first version. In the future we want to speed-up computations bu using casadi functions
 
@@ -192,12 +192,24 @@ class muscle_redundancy_solver:
                 dm_name = self.muscles_selected[j] + '_' + self.dofs[i]
                 dm[j, :, i] = np.interp(t, dm_dat.time, dm_dat[dm_name])
         lmt = np.zeros([nmuscles, N])
+        vmt = np.zeros([nmuscles, N])
         for i in range(0, nmuscles):
             lmt[i, :] = np.interp(t, lmt_dat.time, lmt_dat[lmt_dat.columns[i+1]])
+            lmt_dot = np.gradient(lmt_dat[lmt_dat.columns[i + 1]], lmt_dat.time)
+            vmt[i, :] = np.interp(t, lmt_dat.time, lmt_dot)
+
+        # compute time derivative lmt
+
         # interpolate inverse dynamic moment
         id = np.zeros([ndof, N])
         for i in range(0, ndof):
             id[i, :] = np.interp(t, iddat.time, iddat[self.dofs[i] + '_moment'])
+
+        # static optimization to get initial guess
+        if bool_static_opt:
+            self.static_optimization(t, lmt, vmt, dm, id)
+
+
 
         # model info
         nmuscles = len(self.muscles_selected)
@@ -331,6 +343,66 @@ class muscle_redundancy_solver:
         # manually select muscles
         self.muscles_selected = muscles_selected
 
+    def static_optimization(self, t, lmt, vmt, dm, id):
+        # compute muscle fiber lengths assuming rigid tendon
+        N = lmt.shape[1]
+        ndof = len(self.dofs)
+        nmuscles = len(self.muscles_selected)
+
+        # optimization variables
+        opti = ca.Opti()
+        a = opti.variable(nmuscles, N)
+        topt = opti.variable(ndof, N)
+
+        # bounds
+        opti.subject_to(a[:]>0)
+        opti.subject_to(a[:]<1)
+        opti.subject_to(topt[:]>-10)
+        opti.subject_to(topt[:]<10)
+
+        # muscle forces
+        tau_joint_muscles = ca.MX.zeros(ndof,N)
+        lm_tilde_mat = ca.MX.zeros(nmuscles, N)
+        for m in range(len(self.muscles_selected)):
+            msel = self.degroote_muscles[m]
+            lmt_sel = lmt[m,:]
+            vmt_sel = vmt[m,:]
+            a_sel = a[m,:].T
+            Fmuscle = msel.compute_muscle_force_rigid_tendon(lmt[m,:], vmt[m,:], a[m,:].T)
+            lm_tilde_mat[m, :]= msel.get_norm_fiber_length()
+            for dof in range(ndof):
+                dm_sel = dm[m, :, dof]
+                tau_joint_muscles[dof, :] = tau_joint_muscles[dof, :] + (Fmuscle * dm_sel).T
+
+        # constraint ID torque equals sum of muscle torques
+        opti.subject_to(tau_joint_muscles + topt == id)
+
+        # objective function
+        opti.minimize(ca.sumsqr(topt) + ca.sumsqr(a))
+
+        # solve optimization problem
+        p_opts = {}
+        s_opts = {"max_iter": 1000, "tol": 1e-5, "linear_solver": "mumps",
+                    "nlp_scaling_method": "gradient-based"}
+        opti.solver("ipopt", p_opts, s_opts)
+        sol = opti.solve()
+
+        #unpack solution
+        self.sol_static_opt = {"a": sol.value(a),
+                               "topt": sol.value(topt),
+                               "lm_tilde": sol.value(lm_tilde_mat),
+                               "t": t}
+
+
+
+
+
+
+
+
+
+        print('todo')
+
     #------------------------
     # create casadi functions
     #------------------------
@@ -379,6 +451,9 @@ class muscle_redundancy_solver:
 
         return muscle_dyn_func
 
+    #------------------------
+    # Debug functions
+    #------------------------
 
     def debug_lmt(self):
         # we want to check here if lm_tilde is reasonable given the lmt and dm values
