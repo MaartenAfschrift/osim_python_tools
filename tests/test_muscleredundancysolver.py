@@ -20,9 +20,9 @@ idfile = os.path.join(mainpath,'data','Walking_ID.sto')
 my_mrs = muscle_redundancy_solver(osim_model_path, ikfile, idfile)
 
 # set dofs
-dofs =['hip_flexion_r','knee_angle_r' ,'ankle_angle_r','hip_adduction_r','hip_rotation_r']
+#dofs =['hip_flexion_r','knee_angle_r' ,'ankle_angle_r','hip_adduction_r','hip_rotation_r']
 #dofs =['knee_angle_r' ,'ankle_angle_r']
-#dofs = ["ankle_angle_r"]
+dofs = ["ankle_angle_r"]
 #dofs = ["knee_angle_r"]
 my_mrs.set_dofs(dofs)
 
@@ -46,7 +46,11 @@ my_mrs.get_muscle_properties()
 my_mrs.debug_lmt()
 
 # test formulate and solve ocp
-my_mrs.formulate_solve_ocp(dt = 0.01, t0 = 0.6,tend = 1.9 )
+my_mrs.formulate_solve_ocp(dt = 0.01, tstart = 0.6,tend = 1.9 )
+
+# compute work done by muscle fibers
+F_fibers = my_mrs.solution['active_fiber_force']
+v_fibers = my_mrs.solution['fiber_velocity']
 
 # plot optimal solution
 plt.figure()
@@ -104,6 +108,16 @@ else:
         plt.xlabel('time [s]')
         plt.ylabel('torque')
     plt.legend()
+
+plt.figure()
+plt.plot(my_mrs.solution['t'].T, my_mrs.solution['fiber_power'].T)
+plt.xlabel('time [s]')
+plt.ylabel('fiber power')
+
+plt.figure()
+plt.plot(my_mrs.solution['t'], my_mrs.solution['tendon_power'].T)
+plt.xlabel('time [s]')
+plt.ylabel('tendon power')
 
 
 plt.show()

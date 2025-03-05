@@ -106,6 +106,26 @@ class DeGrooteMuscle:
         norm_fiber_velocity = (np.sinh((velocity_force - d4) / d1) - d3) / d2
         return norm_fiber_velocity
 
+    @staticmethod
+    def force_length_tendon(norm_tendon_length, kT, tendon_shift):
+        # 'evaluating eqs. S18, 3, and S19'
+        c1 = 0.200
+        c2 = 0.995
+        c3 = 0.250
+        # Equation S1:
+        ft = c1 * np.exp(kT * (norm_tendon_length - c2)) - c3 + tendon_shift
+        return(ft)
+
+    @staticmethod
+    def inverse_force_length_tendon(ft, kT, tendon_shift):
+        # 'evaluating eqs. S18, 3, and S19'
+        c1 = 0.200
+        c2 = 0.995
+        c3 = 0.250
+        # Equation S1:
+        norm_tendon_length = np.log((ft + c3 - tendon_shift) / c1) / kT + c2
+        return norm_tendon_length
+
 
     ## Computations
     def compute_fiber_length(self):
@@ -143,16 +163,13 @@ class DeGrooteMuscle:
         self.tendon_shift = reference_norm_tendon_force - adjusted_norm_tendon_force
 
     def compute_tendon_force(self):
+        # compute norm tendon length based on lmt and fiber length
         self.compute_norm_tendon_length()
+        # computes shift in force-length curve tendon
         self.compute_tendon_shift()
-
-        # 'evaluating eqs. S18, 3, and S19'
-        c1 = 0.200
-        c2 = 0.995
-        c3 = 0.250
-        # Equation S1:
-        ft = c1 * np.exp(self.kT * (self.norm_tendon_length - c2)) - c3 + self.tendon_shift
-        # Equation 3
+        # computes norm tendon force
+        ft = self.force_length_tendon(self.norm_tendon_length, self.kT, self.tendon_shift)
+        # computes tendon force in N
         self.tendon_force = self.maximal_isometric_force * ft
 
     def compute_fiber_force(self):
@@ -223,35 +240,36 @@ class DeGrooteMuscle:
 
 
     def compute_hill_equilibrium(self):
-        self.compute_fiber_length()
-        self.compute_tendon_length()
+        self.compute_fiber_length() # denorm fiber length
+        self.compute_tendon_length() # tendon length from lmt and fiber length
         self.compute_force_length() # F/l relation
         self.compute_velocity_force() # F/v relation
-        self.compute_passive_fiber_force()
-        self.compute_tendon_force()
+        self.compute_passive_fiber_force() # passive F/l relation
+        self.compute_tendon_force() # tendon force from tendon length
 
         # Equation S18:
-        cosalpha = (self.mtLength - self.tendon_length) / self.fiber_length
+        self.cosalpha = (self.mtLength - self.tendon_length) / self.fiber_length
 
         # Equation S31: equilibrium force tendon and force fiber + force passive
-        hill_equilibrium = self.maximal_isometric_force * cosalpha * \
+        hill_equilibrium = self.maximal_isometric_force * self.cosalpha * \
                           (self.activation * self.active_fiber_force * self.velocity_force + self.passive_fiber_force) \
                           - self.tendon_force
+
         return hill_equilibrium
 
     def compute_hill_equilibrium_linear_fv(self):
-        self.compute_fiber_length()
-        self.compute_tendon_length()
+        self.compute_fiber_length() # denorm fiber length
+        self.compute_tendon_length() # tendon length from lmt and fiber length
         self.compute_force_length() # F/l relation
         self.compute_velocity_force_linear_fv() # F/v relation
-        self.compute_passive_fiber_force()
-        self.compute_tendon_force()
+        self.compute_passive_fiber_force() # passive F/l relation
+        self.compute_tendon_force() # tendon force from tendon length
 
         # Equation S18:
-        cos_alpha = (self.mtLength - self.tendon_length) / self.fiber_length
+        self.cos_alpha = (self.mtLength - self.tendon_length) / self.fiber_length
 
         # Equation S31:
-        hill_equilibrium = self.maximal_isometric_force * cos_alpha * \
+        hill_equilibrium = self.maximal_isometric_force * self.cos_alpha * \
                           (self.activation * self.active_fiber_force * self.velocity_force + self.passive_fiber_force) \
                           - self.tendon_force
         return hill_equilibrium
@@ -263,9 +281,9 @@ class DeGrooteMuscle:
         fiber_length = np.sqrt(lm_x ** 2 + fiber_width ** 2)
         self.norm_fiber_length = fiber_length / self.optimal_fiber_length
         self.norm_fiber_velocity = vMt / self.maximal_fiber_velocity / self.optimal_fiber_length
-        self.compute_force_length()
-        self.compute_velocity_force()
-        self.compute_passive_fiber_force()
+        self.compute_force_length() # F/l relation muscle fiber
+        self.compute_velocity_force() # F/v relation muscle fiber
+        self.compute_passive_fiber_force() # passive F/l relation
         # compute muscle force
         cosalpha = lm_x / fiber_length
         Fmuscle = (self.maximal_isometric_force * cosalpha *
@@ -372,6 +390,15 @@ class DeGrooteMuscle:
     def get_norm_fiber_length(self):
         return self.norm_fiber_length
 
+    def get_fiber_length(self):
+        return self.norm_fiber_length * self.optimal_fiber_length
+
+    def get_norm_fiber_velocity(self):
+        return self.norm_fiber_velocity
+
+    def get_fiber_velocity(self):
+        return self.norm_fiber_length * self.optimal_fiber_length * self.maximal_fiber_velocity
+
     def get_tendon_shift(self):
         return self.tendon_shift
 
@@ -399,8 +426,45 @@ class DeGrooteMuscle:
     def get_tendon_force(self):
         return self.tendon_force
 
-    def get_norm_fiber_velocity(self):
-        return self.norm_fiber_velocity
+    def get_active_fiber_force(self):
+        self.active_fiber_force_denorm = self.active_fiber_force * self.activation * self.maximal_isometric_force
+        return self.active_fiber_force_denorm
+
+    def get_tendon_length(self):
+        return self.tendon_length
+
+    def get_maximal_fiber_velocity(self):
+        return self.maximal_fiber_velocity
+
+    def get_pennation_angle(self):
+        alpha = np.arccos(self.cosalpha)
+        return(alpha)
+
+    # set function for muscle properties
+    def set_tendon_stiffness(self, kT):
+        self.kT = kT
+        # and compute offset again
+        self.get_tendon_shift()
+
+    def set_maximal_isometric_force(self, FMo):
+        self.maximal_isometric_force = FMo
+
+    def set_optimal_fiber_length(self, lMo):
+        self.optimal_fiber_length = lMo
+
+    def set_tendon_slack_length(self, lTs):
+        self.tendon_slack_length = lTs
+
+    def set_optimal_pennation_angle(self, alpha):
+        self.optimal_pennation_angle= alpha
+
+    def set_maximal_fiber_velocity(self, vmax):
+        self.maximal_fiber_velocity = vmax
+
+
+
+
+
 
 
 
