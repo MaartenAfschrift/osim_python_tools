@@ -397,7 +397,7 @@ class DeGrooteMuscle:
         return self.norm_fiber_velocity
 
     def get_fiber_velocity(self):
-        return self.norm_fiber_length * self.optimal_fiber_length * self.maximal_fiber_velocity
+        return self.norm_fiber_velocity * self.optimal_fiber_length * self.maximal_fiber_velocity
 
     def get_tendon_shift(self):
         return self.tendon_shift
