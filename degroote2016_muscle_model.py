@@ -32,7 +32,7 @@ class DeGrooteMuscle:
         self.kpe = 4.0
         self.e0 = 0.6
 
-        # Define instances
+        # Define instances (this is a bit ugly, do we really need this ?)
         self.mtLength = None
         self.activation = 0
         self.fiber_width = None
