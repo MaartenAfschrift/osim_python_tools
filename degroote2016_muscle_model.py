@@ -43,7 +43,7 @@ class DeGrooteMuscle:
         self.fiber_force = None
         self.norm_fiber_force = None
         self.passive_fiber_force = None
-        self.active_fiber_force = None
+        self.active_fiber_force = None # this is currently force length relation, why ?
         self.norm_fiber_velocity = None # [/lmtopt/vmax]
         self.norm_fiber_length_dot = None # time derivative of normalized fiber length [/lmopt]
         self.norm_fiber_length = None
@@ -430,6 +430,10 @@ class DeGrooteMuscle:
         self.active_fiber_force_denorm = self.active_fiber_force * self.activation * self.maximal_isometric_force
         return self.active_fiber_force_denorm
 
+    def get_force_fiber_flv(self):
+        return self.active_fiber_force_denorm * self.velocity_force
+
+
     def get_tendon_length(self):
         return self.tendon_length
 
@@ -439,6 +443,7 @@ class DeGrooteMuscle:
     def get_pennation_angle(self):
         alpha = np.arccos(self.cosalpha)
         return(alpha)
+
 
     # set function for muscle properties
     def set_tendon_stiffness(self, kT):

@@ -6,7 +6,9 @@ import sys
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, parent_dir)
 
-from muscle_redundancy_solver import muscle_redundancy_solver, ideal_muscles_actuated
+from muscle_redundancy_solver import (muscle_redundancy_solver,
+                                      ideal_muscles_actuated,
+                                      analyse_mrs_results)
 from matplotlib import pyplot as plt
 import matplotlib
 matplotlib.use('Qt5Agg') # interactive backend for matplotlib figures
@@ -47,6 +49,8 @@ my_mrs.formulate_solve_ocp(dt = 0.01, tstart = tspan[0], tend = tspan[1],
                            objective_function='min_act')
 my_mrs.default_plot()
 my_mrs.plot_static_opt_results()
+# function to analyse mrs results
+analyse_mrs_results(my_mrs.solution)
 
 # debugging problem with MRS
 # as long I use one dof everything seems fine and things to wrong if I use multiple dofs
