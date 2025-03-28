@@ -5,8 +5,8 @@ from numpy.distutils.conv_template import header
 from osim_utilities import osim_subject
 import casadi as ca
 import opensim as osim
-from osim_utilities import readMotionFile
-from general_utilities import lowPassFilterDataFrame
+from osim_utilities import readMotionFile, WriteMotionFile
+from general_utilities import lowPassFilterDataFrame, diary
 import numpy as np
 from pathlib import Path
 from degroote2016_muscle_model import DeGrooteMuscle
@@ -29,8 +29,10 @@ matplotlib.use('Qt5Agg') # interactive backend for matplotlib figures
 # 3. formulate and solve optimal control problem
 # 4. output solution
 
-# approach: create class for redundancy solver
+# problems / ToDo things
+# 0. if we want to filter--> first filter and subsequently compute lmt and moment arms !
 
+# approach: create class for redundancy solver
 class muscle_redundancy_solver:
     def __init__(self, modelfile, ikfile, idfile, dofs, muscles_selected = None,
                  outpath = None):
@@ -148,8 +150,32 @@ class muscle_redundancy_solver:
         self.dm_dat = self.my_subject.dm_dat
 
     def filter_inputs(self, order = 2, cutoff_frequency = 6, tstart = None, tend = None):
-        if self.lmt_dat is None:
-            self.compute_lmt_dm(tstart=tstart, tend=tend)
+        # create new folder name
+        original_path = self.my_subject.ikfiles[0].parent
+        parts = list(original_path.parts)
+        parts[-1] = parts[-1] + '_filt'
+        ik_filt_path = Path(*parts)
+        if not ik_filt_path.exists():
+            os.mkdir(ik_filt_path)
+
+        # first filter IK and store as a new ik file, update ik files in subject
+        ikfiles = []
+        for ikfile in self.my_subject.ikfiles:
+            # read .mot file and save filtered .mot file in folder with orignal folder name with _filt extension
+            ikdat = readMotionFile(ikfile)
+            ikdat_filt = lowPassFilterDataFrame(ikdat, cutoff_frequency, order)
+            # directory filtered ik file (without filename)
+            ikfile_filt = ik_filt_path / (ikfile.stem + '_filt' + ikfile.suffix)
+            WriteMotionFile(ikdat_filt.to_numpy(), ikdat_filt.columns, ikfile_filt)
+            ikfiles.append(ikfile_filt)
+
+        # update ik files in subject
+        self.my_subject.set_ikfiles(ikfiles)
+        self.my_subject.read_ikfiles()
+        self.ikdat = self.my_subject.ikdat
+
+        # compute muscle tendon length and moment arms
+        self.compute_lmt_dm(tstart=tstart, tend=tend)
 
         ntrials = len(self.iddat)
         for itrial in range(ntrials):
@@ -163,6 +189,7 @@ class muscle_redundancy_solver:
             self.ikdat[itrial] = lowPassFilterDataFrame(self.ikdat[itrial], cutoff_frequency, order)
 
     def init_muscle_model(self, bool_overwrite = False):
+        # this function creates the degroote muscle objects from the opensim model
 
         if (self.degroote_muscles is None) or bool_overwrite:
             # get muscle properties
@@ -179,6 +206,7 @@ class muscle_redundancy_solver:
                                                             vmax_default, kT_default))
 
     def interpolate_inputs(self, dt = 0.01, tstart = None, tend = None, itrial = 0):
+        # this functions interpolates everything to the same time axis
 
         # first version for a single trial
         iddat = self.iddat[itrial]
@@ -189,8 +217,6 @@ class muscle_redundancy_solver:
         for col in ikdat.columns:
             if 'angle' in col:
                 ikdat[col] = ikdat[col] * np.pi / 180
-
-
 
         # Create a discrete time axis
         if tstart is None:
@@ -253,10 +279,14 @@ class muscle_redundancy_solver:
                             bool_write_solution = True, objective_function = 'min_act',
                             opt_var_info = 'default'):
         # formulate optimal control problem
-        # this is the first version. In the future we want to speed-up computations bu using casadi functions
+        # this is the first version. In the future we want to speed-up computations by using casadi functions
         # options for objective function are:
         # - min_act: minimize muscle activations
         # - min_pos_fiber_power: minimize positive fiber power
+
+        # TO DO: I want to log all the output that is printed to the screen in this function and save it as
+        # a txt file (when writing results to a pickle).
+
 
         # init degroote muscles (if needed)
         self.init_muscle_model(bool_overwrite = False)
@@ -267,7 +297,7 @@ class muscle_redundancy_solver:
         elif opt_var_info == 'tendon_stiffness':
             muscle_dyn_func = self.casadi_func_muscle_dyn_opt_tendon_stiffness()
 
-        # compue lmt and dm if needed
+        # compute lmt and dm if needed
         if self.lmt_dat is None:
             self.compute_lmt_dm()
 
@@ -305,8 +335,8 @@ class muscle_redundancy_solver:
             opti.set_initial(tendon_stiffness, 35)
 
         # lower bounds on optimization variables
-        opti.subject_to(0.01 < e[:])
-        opti.subject_to(0.01 < a[:])
+        opti.subject_to(0 < e[:])
+        opti.subject_to(0 < a[:])
         opti.subject_to(0.2 < lm_tilde[:])
         opti.subject_to(-10 < vm_tilde[:])
         if objective_function == 'min_pos_fiber_power':
@@ -411,13 +441,18 @@ class muscle_redundancy_solver:
 
         opti.minimize(J*10)
 
+        # log everything in diary
+        output_file = self.get_filename_output()
+        my_diary = diary(output_file[0:-4] + '.txt')
+        my_diary.on()
         p_opts = {"expand": True}
         #p_opts = {}
         s_opts = {"max_iter": 1000, "tol": 1e-5, "linear_solver": "mumps",
                   "nlp_scaling_method": "gradient-based"}
         opti.solver("ipopt", p_opts, s_opts)
         sol = opti.solve()
-
+        stats = sol.stats()
+        my_diary.off()
         self.solution = {"t": self.t,
                          "e": sol.value(e),
                          "a": sol.value(a),
@@ -433,7 +468,8 @@ class muscle_redundancy_solver:
                          "J": sol.value(J),
                          "dofs": self.dofs,
                          "muscles": self.muscles_selected,
-                         "objective_function": objective_function}
+                         "objective_function": objective_function,
+                         "solver_stats": stats }
 
         # post-processing
         muscle_dyn_constr_test = np.zeros_like(self.solution['e'])
@@ -772,8 +808,8 @@ class muscle_redundancy_solver:
             filename = filename + '.pkl'
         self.filename = filename
 
+    def get_filename_output(self, filename = None, filepath = None):
 
-    def write_results(self, filename = None, filepath = None):
         # Save
         # is filename and file path is none derive it from inputs
         if filepath is None:
@@ -803,10 +839,18 @@ class muscle_redundancy_solver:
                     counter += 1
                     new_filename = f"{base}_{counter}{ext}"
                 filename = new_filename
-
-            with open(filename, "wb") as f:
-                pickle.dump(self.solution, f)
         else:
+            filename = None
+
+        return filename
+
+    def write_results(self, filename = None, filepath = None):
+       # update filename if needed
+       out_file = self.get_filename_output(filename, filepath)
+       if out_file is not None:
+           with open(out_file, "wb") as f:
+               pickle.dump(self.solution, f)
+       else:
             print('No output path specified')
 
     def default_plot(self):
@@ -873,17 +917,21 @@ class muscle_redundancy_solver:
 
 
 # child of the MRS solver that ignores the force-length-velocity properties of the muscle fibers
+# options to add parralel elastic element and pennation angle
 class ideal_muscles_actuated(muscle_redundancy_solver):
     # init function is the same as in the redundancy solver
     def __init__(self, modelfile, ikfile, idfile, dofs,
                  muscles_selected = None, outpath = None):
         super().__init__(modelfile, ikfile, idfile, dofs, muscles_selected, outpath)
         self.version = 'ignore_FLV'
+        self.ignore_par_elastic = True
+        self.ignore_pennation = True
 
     # we need to overwrite the muscle dynamics function
     def formulate_solve_ocp(self, dt = 0.01, tstart = None, tend = None, bool_static_opt = True,
                             objective_function = 'min_act', bool_write_solution = True,
-                            opt_var_info = 'default'):
+                            opt_var_info = 'default', ignore_par_elastic = True,
+                            ignore_pennation = True):
         # formulate optimal control problem
         # this is the first version. In the future we want to speed-up computations bu using casadi functions
         # options for objective function are:
@@ -898,7 +946,11 @@ class ideal_muscles_actuated(muscle_redundancy_solver):
         if opt_var_info == 'default':
             muscle_dyn_func = self.casadi_func_muscle_dyn()
         elif opt_var_info == 'tendon_stiffness':
-            muscle_dyn_func = self.casadi_func_muscle_dyn_opt_tendon_stiffness()
+            muscle_dyn_func = self.casadi_func_muscle_dyn(bool_opt_tendon_stiffness=True)
+        if not(ignore_par_elastic):
+            func_par_elastic = self.casadi_func_par_elastic_force()
+
+
 
         # get lmt dat if needed
         if self.lmt_dat is None:
@@ -919,7 +971,7 @@ class ideal_muscles_actuated(muscle_redundancy_solver):
         a = opti.variable(nmuscles, N)
         tau_ideal_optvar = opti.variable(ndof, N)  # ideal joint torque
         tau_ideal = tau_ideal_optvar  # scaling factor
-        Ltendon_dot = opti.variable(nmuscles, N)
+        tendon_length_dot = opti.variable(nmuscles, N)
 
         if objective_function == 'min_pos_fiber_power':
             s_pos_power = opti.variable(nmuscles, N) * 100
@@ -930,15 +982,13 @@ class ideal_muscles_actuated(muscle_redundancy_solver):
         if opt_var_info == 'tendon_stiffness':
             tendon_stiffness = opti.variable(nmuscles)
 
-
         # lower bounds on optimization variables
-        opti.subject_to(0.01 < a[:])
+        opti.subject_to(0 < a[:])
         if opt_var_info == 'tendon_stiffness':
             opti.subject_to(tendon_stiffness[:] > 20)
 
-
         # upper bounds on optimization variables
-        opti.subject_to(a[:] < 1)
+        #opti.subject_to(a[:] < 1) # not needed here
         if opt_var_info == 'tendon_stiffness':
             opti.subject_to(tendon_stiffness[:] < 50)
 
@@ -951,22 +1001,29 @@ class ideal_muscles_actuated(muscle_redundancy_solver):
         # I will ignore pennation angle in this simulation
         # muscle dynamics as a constraint (with some additional outputs for post-processing)
         muscle_torque = ca.MX(ndof, N)
-        Ftendon = ca.MX(nmuscles, N)
-        Ltendon = ca.MX(nmuscles, N)
+        tendon_force = ca.MX(nmuscles, N)
+        tendon_length = ca.MX(nmuscles, N)
         for k in range(0, N):
             if opt_var_info == 'default':
-                muscle_torque[:, k], Ftendon[:, k], Ltendon[:, k] = (
+                muscle_torque[:, k], tendon_force[:, k], tendon_length[:, k] = (
                     muscle_dyn_func(a[:, k], self.lmt[:, k], self.dm[:, k, :]))
             elif opt_var_info == 'tendon_stiffness':
-                muscle_torque[:, k], Ftendon[:, k], Ltendon[:, k] = (
+                muscle_torque[:, k], tendon_force[:, k], tendon_length[:, k] = (
                     muscle_dyn_func(a[:, k], self.lmt[:, k], self.dm[:, k, :], tendon_stiffness))
 
         moment_constr = (muscle_torque + tau_ideal)- self.id
         opti.subject_to(moment_constr == 0)
 
+        # computer fiber force
+        par_elastic_force = ca.MX.zeros(nmuscles, N)
+        if not (ignore_par_elastic):
+            for k in range(0, N):
+                par_elastic_force[:, k] = func_par_elastic(tendon_length, self.lmt[:,k])
+            fiber_force = tendon_force  - par_elastic_force
+
         # compute tendon velocity with same numerical method as in direct collocation problem
-        x_mx = Ltendon
-        xd_mx = Ltendon_dot
+        x_mx = tendon_length
+        xd_mx = tendon_length_dot
         int_error = self.trapezoidal_intergrator(x_mx[:, 0:-1], x_mx[:, 1:], xd_mx[:, 0:-1], xd_mx[:, 1:], dt)
         opti.subject_to(int_error == 0)
 
@@ -974,29 +1031,33 @@ class ideal_muscles_actuated(muscle_redundancy_solver):
         if objective_function == 'min_act':
             J = (10*ca.sumsqr(a) / N / nmuscles +
                  0.1 * ca.sumsqr(tau_ideal_optvar) / N / ndof +
-                 0.001 * ca.sumsqr(Ltendon_dot) / N / nmuscles)
+                 0.001 * ca.sumsqr(tendon_length_dot) / N / nmuscles)
         elif objective_function == 'min_pos_fiber_power':
             # compute power of the actuator
-            velocity_actuator = self.vmt - Ltendon_dot
-            power_actuator = -velocity_actuator * Ftendon
+            velocity_actuator = self.vmt - tendon_length_dot
+            power_actuator = -velocity_actuator * tendon_force
             # constraint with helper variables
             opti.subject_to(power_actuator/100 == (s_pos_power/100 - s_neg_power/100))
             # objective function
             J = (ca.sumsqr(s_pos_power/100) / N / nmuscles +
                  1 * ca.sumsqr(a) / N / nmuscles +
                  0.1 * ca.sumsqr(tau_ideal_optvar) / N / ndof +
-                 0.001 * ca.sumsqr(Ltendon_dot) / N / nmuscles)
+                 0.001 * ca.sumsqr(tendon_length_dot) / N / nmuscles)
         elif objective_function == 'min_fiber_power_squared':
             # compute power of the actuator
-            velocity_actuator = self.vmt - Ltendon_dot
-            power_actuator = -velocity_actuator * Ftendon
+            velocity_actuator = self.vmt - tendon_length_dot
+            power_actuator = -velocity_actuator * tendon_force
             J = (ca.sumsqr(power_actuator/10) / N / nmuscles +
                  0.1 * ca.sumsqr(a) / N / nmuscles +
                  0.1 * ca.sumsqr(tau_ideal_optvar) / N / ndof +
-                 0.001 * ca.sumsqr(Ltendon_dot) / N / nmuscles)
+                 0.001 * ca.sumsqr(tendon_length_dot) / N / nmuscles)
         else:
             print('objective function not recognized')
         opti.minimize(J)
+
+        output_file = self.get_filename_output()
+        my_diary = diary(output_file[0:-4] + '.txt')
+        my_diary.on()
 
         p_opts = {"expand": True}
         # p_opts = []
@@ -1007,22 +1068,25 @@ class ideal_muscles_actuated(muscle_redundancy_solver):
 
         opti.solver("ipopt", p_opts, s_opts)
         sol = opti.solve()
+        stats = sol.stats()
+        my_diary.off()
 
         self.solution = {"t": self.t,
                          "a": sol.value(a),
                          "moment_arm": self.dm,
                          "lmt": self.lmt,
                          "id": self.id,
-                         "tendon_force": sol.value(Ftendon),
-                         "tendon_length": sol.value(Ltendon),
-                         "tendon_velocity": sol.value(Ltendon_dot),
+                         "tendon_force": sol.value(tendon_force),
+                         "tendon_length": sol.value(tendon_length),
+                         "tendon_velocity": sol.value(tendon_length_dot),
                          "tau_ideal": sol.value(tau_ideal),
                          "muscle_torque": sol.value(muscle_torque),
                          "J": sol.value(J),
                          "dofs": self.dofs,
                          "muscles": self.muscles_selected,
                          "vmt": self.vmt,
-                         "objective_function": objective_function}
+                         "objective_function": objective_function,
+                         "solver_stats": stats}
         # post processing
         fiber_velocity = self.vmt - self.solution['tendon_velocity']
         fiber_power = -fiber_velocity * self.solution['tendon_force']
@@ -1050,7 +1114,7 @@ class ideal_muscles_actuated(muscle_redundancy_solver):
         # return solution
         return self.solution
 
-    def casadi_func_muscle_dyn(self):
+    def casadi_func_muscle_dyn(self, bool_opt_tendon_stiffness = False):
 
         nmuscles = len(self.muscles_selected)
         ndof = len(self.dofs)
@@ -1059,6 +1123,8 @@ class ideal_muscles_actuated(muscle_redundancy_solver):
         a = ca.MX.sym('a', nmuscles)
         lmt = ca.MX.sym('lmt', nmuscles)
         dm = ca.MX.sym('dm', nmuscles, ndof)
+        if bool_opt_tendon_stiffness:
+            tendon_stiffness = ca.MX.sym('tendon_stiffness', nmuscles)
 
         # pre-allocate outputs
         Ftendon = ca.MX.zeros(nmuscles)
@@ -1068,6 +1134,9 @@ class ideal_muscles_actuated(muscle_redundancy_solver):
         for m in range(nmuscles):
             # set muscle state
             msel = self.degroote_muscles[m]
+            if bool_opt_tendon_stiffness:
+                # set tendon stiffness
+                msel.set_tendon_stiffness(tendon_stiffness[m])
             # compute force ideal actuator
             Fmuscle = a[m] * msel.maximal_isometric_force
             for dof in range(ndof):
@@ -1075,53 +1144,56 @@ class ideal_muscles_actuated(muscle_redundancy_solver):
             Ftendon[m] = Fmuscle
             # compute tendon length at this velocity
             Ftendon_norm = Fmuscle / msel.maximal_isometric_force
-            Ltendon_norm = msel.inverse_force_length_tendon(Ftendon_norm, msel.kT, msel.tendon_shift)
+            Ltendon_norm = msel.inverse_force_length_tendon(Ftendon_norm,
+                                                            msel.kT,
+                                                            msel.tendon_shift)
             Ltendon[m] = Ltendon_norm * msel.tendon_slack_length
 
         # create casadi function
-        muscle_dyn_func = ca.Function('muscle_dyn_func', [a, lmt, dm],
-                                      [tau_joint_muscles, Ftendon, Ltendon],
-                                      ['a', 'lmt', 'dm'],
-                                      ['joint_torque_muscles', 'Ftendon', 'Ltendon'])
+        if bool_opt_tendon_stiffness:
+            muscle_dyn_func = ca.Function('muscle_dyn_func', [a, lmt, dm, tendon_stiffness],
+                                          [tau_joint_muscles, Ftendon, Ltendon],
+                                          ['a', 'lmt', 'dm', 'kT'],
+                                          ['joint_torque_muscles', 'Ftendon', 'Ltendon'])
+        else:
+            muscle_dyn_func = ca.Function('muscle_dyn_func', [a, lmt, dm],
+                                          [tau_joint_muscles, Ftendon, Ltendon],
+                                          ['a', 'lmt', 'dm'],
+                                          ['joint_torque_muscles', 'Ftendon', 'Ltendon'])
+
         return(muscle_dyn_func)
 
-    def casadi_func_muscle_dyn_opt_tendon_stiffness(self):
-
-        nmuscles = len(self.muscles_selected)
-        ndof = len(self.dofs)
+    def casadi_func_par_elastic_force(self):
 
         # create symbolic variables for inputs
-        a = ca.MX.sym('a', nmuscles)
+        nmuscles = len(self.muscles_selected)
+        ndof = len(self.dofs)
+        Ltendon = ca.MX.sym('Ltendon', nmuscles)
         lmt = ca.MX.sym('lmt', nmuscles)
-        dm = ca.MX.sym('dm', nmuscles, ndof)
-        tendon_stiffness = ca.MX.sym('tendon_stiffness', nmuscles)
 
-        # pre-allocate outputs
-        Ftendon = ca.MX.zeros(nmuscles)
-        tau_joint_muscles = ca.MX.zeros(ndof)
-        Ltendon = ca.MX.zeros(nmuscles)
         # loop over muscles
+        passive_fiber_force = ca.MX.zeros(nmuscles)
         for m in range(nmuscles):
-            # get muscle object
+            # get muscle
             msel = self.degroote_muscles[m]
-            # set tendon stiffness
-            msel.set_tendon_stiffness(tendon_stiffness[m])
-            # compute force ideal actuator
-            Fmuscle = a[m] * msel.maximal_isometric_force
-            for dof in range(ndof):
-                tau_joint_muscles[dof] = tau_joint_muscles[dof] + Fmuscle * dm[m, dof]
-            Ftendon[m] = Fmuscle
-            # compute tendon length at this velocity
-            Ftendon_norm = Fmuscle / msel.maximal_isometric_force
-            Ltendon_norm = msel.inverse_force_length_tendon(Ftendon_norm, msel.kT, msel.tendon_shift)
-            Ltendon[m] = Ltendon_norm * msel.tendon_slack_length
+            # lmuscle
+            lmuscle_fiber = lmt[m] - Ltendon[m]
+            # normalised fiber length
+            lmtilde = lmuscle_fiber / msel.optimal_fiber_length
+            # compute passive force
+            passive_fiber_force[m] = msel.default_force_length_par_elastic(lmtilde)
 
-        # create casadi function
-        muscle_dyn_func = ca.Function('muscle_dyn_func', [a, lmt, dm, tendon_stiffness],
-                                      [tau_joint_muscles, Ftendon, Ltendon],
-                                      ['a', 'lmt', 'dm', 'kT'],
-                                      ['joint_torque_muscles', 'Ftendon', 'Ltendon'])
-        return(muscle_dyn_func)
+        # return casadi function
+        passive_fiber_force_func = ca.Function('passive_fiber_force_func', [Ltendon, lmt],
+                                               [passive_fiber_force],
+                                               ['Ltendon', 'lmt'],
+                                               ['passive_fiber_force'])
+
+
+
+
+
+
 
 
 

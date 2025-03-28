@@ -125,6 +125,13 @@ class DeGrooteMuscle:
         # Equation S1:
         norm_tendon_length = np.log((ft + c3 - tendon_shift) / c1) / kT + c2
         return norm_tendon_length
+    @staticmethod
+    def default_force_length_par_elastic(norm_fiber_length):
+        kpe = 4.0
+        e0 = 0.6
+        t5 = np.exp(kpe * (norm_fiber_length - 0.10e1) / e0)
+        passive_fiber_force = ((t5 - 0.10e1) + 0.995172050006169) / 53.598150033144236
+        return(passive_fiber_force)
 
 
     ## Computations

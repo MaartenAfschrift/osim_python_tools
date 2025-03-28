@@ -195,7 +195,8 @@ files = ['Refwalk_linact_minact.pkl',
          'Refwalk_mrs_minPsq.pkl',
          'Refwalk_mrs_minPsq_opt_tendon.pkl']
 
-results_folder = os.path.join(out_path_main, subject + '_1403_v4')
+#results_folder = os.path.join(out_path_main, subject + '_1403_v4')
+results_folder = os.path.join(out_path_main, subject + '_2803')
 # compute mechanical work for each gait cycle (between two heel strikes)
 results = {}
 

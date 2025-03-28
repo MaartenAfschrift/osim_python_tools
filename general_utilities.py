@@ -3,6 +3,7 @@ from scipy import signal
 import numpy as np
 import pandas as pd
 import os
+import sys
 
 def lowPassFilter(time, data, lowpass_cutoff_frequency, order=4):
     fs = 1 / np.round(np.mean(np.diff(time)), 16)
@@ -76,6 +77,7 @@ def readMotionFile(filename):
 
 
 def WriteMotionFile(data_matrix, colnames, filename):
+
     datarows, datacols = data_matrix.shape
     time = data_matrix[:, 0]
     range_values = [time[0], time[-1]]
@@ -88,8 +90,9 @@ def WriteMotionFile(data_matrix, colnames, filename):
         with open(filename, 'w') as fid:
             # Write MOT file header
             fid.write(f'{filename}\nnRows={datarows}\nnColumns={datacols}\n\n')
-            fid.write(f'name {filename}\ndatacolumns {datacols}\ndatarows {datarows}\nrange {range_values[0]} {range_values[1]}\nendheader\n')
-
+            # ToDo: maybe check if data_matrix is in degrees or radians
+            fid.write(
+                f'name {filename}\ndatacolumns {datacols}\ndatarows {datarows}\nrange {range_values[0]} {range_values[1]}\ninDegrees=yes\nendheader\n')
             # Write column names
             cols = '\t'.join(colnames) + '\n'
             fid.write(cols)
@@ -101,3 +104,28 @@ def WriteMotionFile(data_matrix, colnames, filename):
 
     except IOError:
         print(f'\nERROR: {filename} could not be opened for writing...\n')
+
+class diary:
+    def __init__(self, filename="output_log.txt"):
+        self.filename = filename
+        self.original_stdout = sys.stdout
+        self.original_stderr = sys.stderr
+        self.file = None
+
+    def on(self):
+        """Start logging output to the file."""
+        if self.file is None:
+            self.file = open(self.filename, "w")
+            sys.stdout = self.file
+            sys.stderr = self.file
+            print("Diary ON - Logging started")
+
+    def off(self):
+        """Stop logging and restore normal output."""
+        if self.file:
+            print("Diary OFF - Logging stopped")  # This goes into the file
+            sys.stdout = self.original_stdout
+            sys.stderr = self.original_stderr
+            self.file.close()
+            self.file = None
+            print("Diary OFF - Logging stopped")  # This prints to the screen

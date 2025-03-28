@@ -22,7 +22,7 @@ subject =  'Patient10'
 osim_model_path = os.path.join(main_datapath, subject, 'model','scaled_model_marker.osim')
 ikfile = os.path.join(main_datapath, subject, 'RefWalk', 'KS','KS_Refwalk.mot')
 idfile = os.path.join(main_datapath, subject, 'RefWalk', 'ID','ID_Refwalk.sto')
-out_path = os.path.join(out_path_main, subject + '_1403_v4')
+out_path = os.path.join(out_path_main, subject + '_2803')
 base_filename = 'Refwalk'
 
 # ---------------------------------------
@@ -133,6 +133,7 @@ my_linact_solver.formulate_solve_ocp(dt=timestep, tstart=tspan[0], tend=tspan[1]
 
 # minimize power squared seems to be feasible, method with helper variables doesnt seem to converge
 # (and more importantly, does not results in less mechanical work doen by fibers)
+print('script finished')
 plt.show()
 
 
