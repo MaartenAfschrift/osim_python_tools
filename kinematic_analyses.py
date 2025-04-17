@@ -429,7 +429,7 @@ class moment_arm_api():
                 muscles_sel = self.dofs_dm[dof]
                 # loop over all relevant muscles to get the moment arm
                 for im in muscles_sel:
-                    muscle = muscle_names[im]
+                    muscle = self.muscle_names[im]
                     muscle_m = forceset.get(muscle)
                     muscle_m = osim.Muscle.safeDownCast(muscle_m)
                     # compute moment arms for given state

@@ -68,6 +68,17 @@ plt.ylabel('normalized fiber length')
 
 
 
+# test inverse force length tendon
+norm_tendon_length = np.linspace(1,1.2,30)
+ft = muscle.force_length_tendon(np.linspace(1,1.2,30),35, 0)
+norm_tendon_length2 = muscle.inverse_force_length_tendon(ft,35,0)
+print(norm_tendon_length - norm_tendon_length2)
+
+plt.figure()
+plt.plot(norm_tendon_length, ft)
+plt.plot(norm_tendon_length2, ft)
+plt.xlabel('normalized tendon length')
+plt.ylabel('tendon force [N]')
 # plot figures
 plt.show()
 
