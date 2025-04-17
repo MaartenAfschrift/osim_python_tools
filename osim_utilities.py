@@ -7,7 +7,7 @@ import pandas as pd
 from inverse_dynamics import InverseDynamics
 from inverse_kinematics import InverseKinematics
 from kinematic_analyses import bodykinematics, lmt_api, moment_arm_api
-from general_utilities import readMotionFile, WriteMotionFile
+from general_utilities import readMotionFile, WriteMotionFile, lowPassFilterDataFrame
 import difflib
 
 
@@ -308,6 +308,38 @@ class osim_subject:
                         mot_output=self.ik_directory,
                         overwrite = overwrite)
         if boolRead:
+            self.read_ikfiles()
+
+    # save filtered ik fi]es
+    def filter_and_save_ik(self, outfolder, overwrite = False,
+                           update_ik_directory = True,
+                           cutoff = 6, order = 4):
+        # make output dir if needed
+        if not os.path.isdir(outfolder):
+            os.makedirs(outfolder)
+
+        # loop over ik file to filter it and save it as a .mot file
+        for itrial in range(0, self.nfiles):
+            ik_file = Path(os.path.join(self.ik_directory, self.filenames[itrial] + '.mot'))
+            ik_data = self.read_ik(ik_file)
+            # low pass filter ik data using lowpassfilter dataframe [ToDo]
+            ik_filtered = lowPassFilterDataFrame(ik_data, lowpass_cutoff_frequency=cutoff, order= order)
+            # extract headers and numpy data matrix from pandas dataframe ik_filtered
+            ik_data_filtered = ik_filtered.to_numpy()
+            ik_header = ik_filtered.columns
+            # save the ik data
+            outfile = os.path.join(outfolder, self.filenames[itrial] + '.mot')
+            if not os.path.isfile(outfile) or overwrite:
+                WriteMotionFile(ik_data_filtered, ik_header, outfile)
+                print('saved file ', outfile)
+            else:
+                print('file already exists ', outfile)
+
+        # update ik directory if needed
+        if update_ik_directory:
+            # update ik files and directory
+            self.set_ikfiles_fromfolder(outfolder)
+            # update ik data
             self.read_ikfiles()
 
     # generate external loads files

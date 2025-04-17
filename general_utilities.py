@@ -78,6 +78,7 @@ def readMotionFile(filename):
 
 def WriteMotionFile(data_matrix, colnames, filename):
 
+
     datarows, datacols = data_matrix.shape
     time = data_matrix[:, 0]
     range_values = [time[0], time[-1]]
