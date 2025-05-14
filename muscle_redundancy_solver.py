@@ -128,10 +128,10 @@ class muscle_redundancy_solver:
         # store muscles that span one of the dofs
         self.imuscles_selected = np.unique(np.concatenate(imuscles))
         self.muscles_selected = [self.muscle_names[i] for i in self.imuscles_selected]
+
         # default values for muscles
         self.vmax = np.zeros([len(self.muscles_selected)])+10
         self.Atendon = np.zeros([len(self.muscles_selected)])+35
-        self.get_muscle_properties()
 
         # overwrite degroote muscle objects
         self.init_muscle_model(bool_overwrite=True)
@@ -745,8 +745,11 @@ class muscle_redundancy_solver:
     def debug_lmt(self):
         # we want to check here if lm_tilde is reasonable given the lmt and dm values
         # we can do this by plotting the muscle-tendon length and moment arms for a muscle
-        self.get_muscle_properties()
+        [lm_opt, fisom_opt, tendon_slack, alpha_opt] = self.get_muscle_properties()
         nmuscles = len(self.muscles_selected)
+        if self.lmt_dat is None:
+            self.compute_lmt_dm()
+
         lmt_dat = self.lmt_dat[0]
         lmt = np.zeros([nmuscles, len(lmt_dat.time)])
         for i in range(0, nmuscles):
@@ -757,7 +760,7 @@ class muscle_redundancy_solver:
         ctm = -1
         for m in self.muscles_selected:
             ctm = ctm + 1
-            dl = (lmt[ctm,:] - self.tendon_slack[ctm])/self.lm_opt[ctm]
+            dl = (lmt[ctm,:] - tendon_slack[ctm])/lm_opt[ctm]
             plt.plot(lmt_dat.time,dl, label = m)
         plt.xlabel('time [s]')
         plt.ylabel('lm_tilde rigid tendon')
