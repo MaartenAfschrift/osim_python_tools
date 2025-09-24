@@ -256,7 +256,10 @@ class muscle_redundancy_solver:
         # interpolate inverse dynamic moment
         id = np.zeros([ndof, N])
         for i in range(0, ndof):
-            id[i, :] = np.interp(t, iddat.time, iddat[self.dofs[i] + '_moment'])
+            if self.dofs[i] + '_moment' in iddat.columns:
+                id[i, :] = np.interp(t, iddat.time, iddat[self.dofs[i] + '_moment'])
+            else:
+                id[i, :] = np.interp(t, iddat.time, iddat[self.dofs[i]])
 
         # interpolate inverse kinematics
         ik = np.zeros([ndof, N])
@@ -794,6 +797,16 @@ class muscle_redundancy_solver:
         msel = self.degroote_muscles[isel]
         msel.set_max_isometric_force(Fmax)
 
+    def set_tendon_stiffness_global(self, stiffness_value):
+        for msel in self.degroote_muscles:
+            msel.set_tendon_stiffness(stiffness_value)
+
+
+    def set_tendon_stiffness(self, muscle_name, stiffness_value):
+        isel = self.muscles_selected.index(muscle_name)
+        msel = self.degroote_muscles[isel]
+        msel.set_tendon_stiffness(stiffness_value)
+
     # set lmt data -- select only specific muscles and moment arms in this file
     def set_lmt_dat(self, lmt_datfile):
         print('test')
@@ -892,6 +905,22 @@ class muscle_redundancy_solver:
             plt.title('tendon force')
             plt.legend(self.muscles_selected)
 
+            # plot fiber lengths
+            plt.figure()
+            plt.plot(self.solution['t'], self.solution['lm_tilde'].T)
+            plt.xlabel('time [s]')
+            plt.ylabel('norm fiber length')
+            plt.title('muscle fiber lengths')
+            plt.legend(self.muscles_selected)
+
+            # plot fiber velocities
+            plt.figure()
+            plt.plot(self.solution['t'], self.solution['vm_tilde'].T)
+            plt.xlabel('time [s]')
+            plt.ylabel('norm fiber velocity')
+            plt.title('muscle fiber velocity')
+            plt.legend(self.muscles_selected)
+
     def plot_static_opt_results(self):
         # pot activation and torques of static optimization results
         if self.sol_static_opt is not None:
@@ -916,6 +945,366 @@ class muscle_redundancy_solver:
                     plt.ylabel('torque [Nm]')
                     plt.title(self.dofs[dof] + ' torque')
             plt.legend()
+
+
+
+
+# create a child for the MRS solver with exoskeleton implementation
+class muscle_redundancy_solver_exo(muscle_redundancy_solver):
+    # init function is the same as in the redundancy solver
+    def __init__(self, modelfile, ikfile, idfile, dofs,
+                 muscles_selected = None, outpath = None):
+        super().__init__(modelfile, ikfile, idfile, dofs, muscles_selected, outpath)
+        self.version = 'exoskeleton'
+
+        # some settings specific to exoskeleton
+        self.controller_type = 'openloop'
+        # options for the controller type:
+        #   percentage_id:   support is percentage of the inverse dynamic joint moment
+        #   percentage_id_shortening: percentage id moment when soleus fiber is shortening
+        #   openloop:            exoskeleton torque is an independent variable
+        self.dofs_acutated = dofs # list of dofs that are actuated by the exoskeleton
+        self.direction_assist = 'all' # direction of assistance (all, positive or negative)
+        self.percentage_id_assistance= 0.3 # percentage of the inverse dynamic moment to assist
+
+    def set_controller_type(self, controller_type):
+        self.controller_type = controller_type
+
+    def set_dofs_acutated(self, dofs_acutated):
+        self.dofs_acutated = dofs_acutated
+
+    def set_direction_assist(self, direction_assist):
+        self.direction_assist = direction_assist
+
+    def set_percentage_id_assistance(self, percentage_id_assistance):
+        self.percentage_id_assistance = percentage_id_assistance
+
+    # we only need to overwrite the formulate_solve_ocp function
+    def formulate_solve_ocp(self, dt = 0.01, tstart = None, tend = None, bool_static_opt = True,
+                            bool_write_solution = True, objective_function = 'min_act',
+                            opt_var_info = 'default'):
+        # additional features of the exoskeleton class
+        #   - optimization variables for exoskeleton support
+        #   - option to constrain exoskeleton torque to % id moment
+        #   - option to develop exoskeleton controller that only assists when shortening
+
+
+        # init degroote muscles (if needed)
+        self.init_muscle_model(bool_overwrite = False)
+
+        # create casadi functions
+        if opt_var_info == 'default':
+            muscle_dyn_func = self.casadi_func_muscle_dyn()
+        elif opt_var_info == 'tendon_stiffness':
+            muscle_dyn_func = self.casadi_func_muscle_dyn_opt_tendon_stiffness()
+
+        # compute lmt and dm if needed
+        if self.lmt_dat is None:
+            self.compute_lmt_dm()
+
+        # interpolate inputs
+        self.interpolate_inputs(dt = dt, tstart = tstart, tend = tend)
+
+        # static optimization to get initial guess
+        if bool_static_opt:
+            self.static_optimization(self.t, self.lmt, self.vmt, self.dm, self.id)
+
+        # model info
+        nmuscles = len(self.muscles_selected)
+
+        # unpack some variables
+        N = self.N
+        ndof = len(self.dofs)
+
+        # optimization variables
+        opti = ca.Opti()
+        e = opti.variable(nmuscles, N)
+        a = opti.variable(nmuscles, N)
+        lm_tilde = opti.variable(nmuscles, N) # muscle fiber length / opt length
+        vm_tilde = opti.variable(nmuscles, N) # time derivative of lm_tilde
+        tau_ideal_optvar = opti.variable(ndof, N) # ideal joint torque
+        tau_ideal = tau_ideal_optvar # scaling factor
+        e_exo = opti.variable(ndof, N) # excitation for exoskeleton
+        Topt_exo = 50 # just to scale things
+
+        #    - if minimizing positive fiber power add helper variables
+        if objective_function == 'min_pos_fiber_power':
+            s_pos_power = opti.variable(nmuscles, N)
+            s_neg_power = opti.variable(nmuscles, N)
+
+        #    - if optimizatin tendon stiffness
+        if opt_var_info == 'tendon_stiffness':
+            tendon_stiffness = opti.variable(nmuscles)
+            opti.set_initial(tendon_stiffness, 35)
+
+        # lower bounds on optimization variables
+        opti.subject_to(0 < e[:])
+        opti.subject_to(0 < a[:])
+        opti.subject_to(0.2 < lm_tilde[:])
+        opti.subject_to(-10 < vm_tilde[:])
+        if objective_function == 'min_pos_fiber_power':
+            opti.subject_to(s_pos_power[:] >= 0)
+            opti.subject_to(s_neg_power[:] >= 0)
+        if opt_var_info == 'tendon_stiffness':
+            opti.subject_to(tendon_stiffness[:] > 20)
+
+        # upper bounds on optimization variables
+        opti.subject_to(e[:] < 1)
+        opti.subject_to(a[:] < 1)
+        opti.subject_to(lm_tilde[:] < 1.7)
+        opti.subject_to(vm_tilde[:] < 10)
+        if opt_var_info == 'tendon_stiffness':
+            opti.subject_to(tendon_stiffness[:] < 50)
+
+        # initial guess (in future based on static optimization solution)
+        if bool_static_opt:
+            opti.set_initial(e, self.sol_static_opt['a'])
+            opti.set_initial(a, self.sol_static_opt['a'])
+            opti.set_initial(lm_tilde, self.sol_static_opt['lm_tilde'])
+            opti.set_initial(vm_tilde,self.sol_static_opt['vm_tilde'] )
+        else:
+            opti.set_initial(e[:], 0.1)
+            opti.set_initial(a[:], 0.1)
+            opti.set_initial(lm_tilde[:], 1)
+            opti.set_initial(vm_tilde[:], 0)
+
+        # activation dynamics
+        tact = 0.015
+        tdeact = 0.06
+        #b = 0.1
+        b = 0.1
+        dadt_mx = ca.MX(nmuscles, N)
+        for k in range(0, N):
+            dadt_mx[:,k] = self.activation_dynamics_degroote2016(e[:, k], a[:, k], tact, tdeact, b)
+
+        # trapezoidal integration
+        x_mx = ca.vertcat(a, lm_tilde)
+        xd_mx = ca.vertcat(dadt_mx, vm_tilde)
+        int_error = self.trapezoidal_intergrator(x_mx[:, 0:-1], x_mx[:, 1:], xd_mx[:, 0:-1], xd_mx[:, 1:], dt)
+        opti.subject_to(int_error == 0)
+
+        # muscle dynamics as a constraint (with some additional outputs for post-processing)
+        muscle_dyn_constr = ca.MX(nmuscles, N)
+        muscle_torque = ca.MX(ndof, N)
+        tendon_force= ca.MX(nmuscles, N)
+        active_fiber_force = ca.MX(nmuscles, N)
+        for k in range(0, N):
+            if opt_var_info == 'default':
+                muscle_dyn_constr[:, k], muscle_torque[:, k], tendon_force[:,k], active_fiber_force[:,k] = (
+                    muscle_dyn_func(a[:, k], lm_tilde[:, k],vm_tilde[:, k], self.lmt[:, k], self.dm[:, k, :]))
+            elif opt_var_info == 'tendon_stiffness':
+                muscle_dyn_constr[:, k], muscle_torque[:, k], tendon_force[:, k], active_fiber_force[:, k] = (
+                    muscle_dyn_func(a[:, k], lm_tilde[:, k], vm_tilde[:, k], self.lmt[:, k],
+                                    self.dm[:, k, :], tendon_stiffness))
+
+        # moment constraint including exoskeleton torque
+        tau_exo = e_exo * Topt_exo
+        moment_constr = (muscle_torque + tau_ideal + tau_exo)- self.id
+
+        # add constraints for moment and hill equilibrium
+        opti.subject_to(muscle_dyn_constr == 0)
+        opti.subject_to(moment_constr == 0)
+
+        # constraints on exoskeleton support
+        #   option to specify degrees of freedom with exoskeleton ?
+        #   option to constrain exoskeleton torque to % of id moment
+        tau_exo_constrained = ca.MX.zeros(ndof,N)
+        if self.controller_type == 'percentage_id':
+            for dof in range(ndof):
+                if self.dofs[dof] in self.dofs_acutated:
+                    tau_exo_constrained[dof,:] = self.percentage_id_assistance * self.id[dof,:]
+                else:
+                    tau_exo_constrained[dof, : ] = 0
+            opti.subject_to(tau_exo - tau_exo_constrained == 0)
+        elif self.controller_type == 'percentage_id_shortening':
+            for dof in range(ndof):
+                if self.dofs[dof] in self.dofs_acutated:
+                    # compute assistance based on soleus fiber velocity
+                    # first find soleus muscle
+                    i_soleus = self.muscles_selected.index('soleus_r')
+                    vmtilde_soleus = vm_tilde[i_soleus,:]
+                    # then compute exoskeleton torque
+                    b_exo = 5
+                    cutoff_vel = 0
+                    tau_exo_constrained[dof, :] = self.percentage_id_assistance * self.id[dof,:] * 0.5 * (
+                                np.tanh(-b_exo * (vmtilde_soleus.T - cutoff_vel)) + 1)
+                else:
+                    tau_exo_constrained[dof, :] = 0
+            opti.subject_to(tau_exo - tau_exo_constrained == 0)
+
+
+        # objective function
+        if objective_function == 'min_act':
+            J = (ca.sumsqr(e)/N/nmuscles +
+                 ca.sumsqr(a)/N/nmuscles +
+                 0.1*ca.sumsqr(tau_ideal_optvar)/N/ndof +
+                 0.01 * ca.sumsqr(vm_tilde)/N/nmuscles)
+        elif objective_function == 'min_pos_fiber_power':
+            # get matrix with optimal fiber length
+            lm_opt_mat = np.zeros([nmuscles, N])
+            for m in range(nmuscles):
+                lm_opt_mat[m, :] = self.degroote_muscles[m].get_optimal_fiber_length()
+            # fiber velocity
+            fiber_velocity = vm_tilde * lm_opt_mat
+            # compute fiber power
+            fiber_power = -fiber_velocity * active_fiber_force
+            # constraint with helper variables
+            opti.subject_to(fiber_power/100 == s_pos_power/100 - s_neg_power/100)
+            J = (ca.sumsqr(s_pos_power/100)/N/nmuscles +
+                 0.5 * ca.sumsqr(e) / N / nmuscles +
+                 0.5 * ca.sumsqr(e) / N / nmuscles +
+                 0.1 * ca.sumsqr(tau_ideal_optvar) / N / ndof +
+                 0.01 * ca.sumsqr(vm_tilde) / N / nmuscles)
+        elif objective_function == 'min_fiber_power_squared':
+            # get matrix with optimal fiber length
+            lm_opt_mat = np.zeros([nmuscles, N])
+            for m in range(nmuscles):
+                lm_opt_mat[m, :] = self.degroote_muscles[m].get_optimal_fiber_length()
+            # fiber velocity
+            fiber_velocity = vm_tilde * lm_opt_mat
+            # compute fiber power
+            fiber_power = -fiber_velocity * active_fiber_force
+            J = (ca.sumsqr(fiber_power/10)/N/nmuscles +
+                 0.1 * ca.sumsqr(e) / N / nmuscles +
+                 0.1 * ca.sumsqr(e) / N / nmuscles +
+                 0.1 * ca.sumsqr(tau_ideal_optvar) / N / ndof +
+                 0.01 * ca.sumsqr(vm_tilde) / N / nmuscles)
+        else:
+            print('objective function not recognized')
+
+        opti.minimize(J*10)
+
+        # log everything in diary
+        output_file = self.get_filename_output()
+        my_diary = diary(output_file[0:-4] + '.txt')
+        print('log file in ', output_file[0:-4] + '.txt')
+        my_diary.on()
+        p_opts = {"expand": True}
+        #p_opts = {}
+        s_opts = {"max_iter": 1000, "tol": 1e-5, "linear_solver": "mumps",
+                  "nlp_scaling_method": "gradient-based"}
+        opti.solver("ipopt", p_opts, s_opts)
+        sol = opti.solve()
+        stats = sol.stats()
+        my_diary.off()
+        self.solution = {"t": self.t,
+                         "e": sol.value(e),
+                         "a": sol.value(a),
+                         "lm_tilde": sol.value(lm_tilde),
+                         "vm_tilde": sol.value(vm_tilde),
+                         "muscle_dyn_constr": sol.value(muscle_dyn_constr),
+                         "muscle_torque": sol.value(muscle_torque),
+                         "tau_ideal": sol.value(tau_ideal),
+                         "tendon_force": sol.value(tendon_force),
+                         "moment_arm": self.dm,
+                         "lmt": self.lmt,
+                         "id": self.id,
+                         "J": sol.value(J),
+                         "dofs": self.dofs,
+                         "muscles": self.muscles_selected,
+                         "objective_function": objective_function,
+                         "solver_stats": stats,
+                         "tau_exo": sol.value(tau_exo)}
+
+        # post-processing
+        muscle_dyn_constr_test = np.zeros_like(self.solution['e'])
+        fiber_length = np.zeros_like(self.solution['e'])
+        fiber_velocity = np.zeros_like(self.solution['e'])
+        tendon_velocity = np.zeros_like(self.solution['e'])
+        active_fiber_force = np.zeros_like(self.solution['e'])
+        pennation_angle = np.zeros_like(self.solution['e'])
+        tendon_length = np.zeros_like(self.solution['e'])
+        passive_force = np.zeros_like(self.solution['e'])
+        fiber_force_flv = np.zeros_like(self.solution['e'])
+        for m in range(nmuscles):
+            # set muscle state
+            msel = self.degroote_muscles[m]
+            # set tendon stiffness if needed
+            if opt_var_info == 'tendon_stiffness':
+                msel.set_tendon_stiffness(sol.value(tendon_stiffness)[m])
+            # set muscle state
+            msel.set_activation(self.solution['a'][m,:])
+            msel.set_norm_fiber_length(self.solution['lm_tilde'][m,:])
+            msel.set_norm_fiber_length_dot(self.solution['vm_tilde'][m,:])
+            msel.set_muscle_tendon_length(self.lmt[m,:])
+            muscle_dyn_constr_test[m,:] = msel.compute_hill_equilibrium()
+
+            # analyze muscle info at current state
+            active_fiber_force[m, :] = msel.get_active_fiber_force()
+            tendon_length[m, :] = msel.get_tendon_length()
+            passive_force[m, :] = msel.get_passive_force()
+            fiber_length[m, :] = msel.get_fiber_length()
+            fiber_velocity[m, :] = msel.get_fiber_velocity()
+            pennation_angle[m, :] = msel.get_pennation_angle()
+            fiber_force_flv[m, :] = msel.get_force_fiber_flv()
+
+            # compute tendon velocity
+            vmt_projected = fiber_velocity[m,:] / msel.cosalpha # important divide by cos alpha because constant width
+            tendon_velocity[m, :] = self.vmt[m, :] - vmt_projected
+
+         # other outcomes
+        fiber_power = -fiber_velocity * fiber_force_flv
+        tendon_power = -tendon_velocity * self.solution['tendon_force']
+        muscle_power = -self.vmt * self.solution['tendon_force']
+        pas_fiber_power = -fiber_velocity * passive_force
+
+        self.solution['active_fiber_force'] = active_fiber_force
+        self.solution['tendon_length'] = tendon_length
+        self.solution['passive_force'] = passive_force
+        self.solution['fiber_length'] = fiber_length
+        self.solution['fiber_velocity'] = fiber_velocity
+        self.solution['pennation_angle'] = pennation_angle
+        self.solution['tendon_velocity'] = tendon_velocity
+        self.solution['fiber_power'] = fiber_power
+        self.solution['tendon_power'] = tendon_power
+        self.solution['muscle_power'] = muscle_power
+        self.solution['passive_fiber_power'] = pas_fiber_power
+        self.solution['fiber_force_flv'] = fiber_force_flv
+
+        # power ideal actuator
+        self.solution["power_actuator"] = self.solution["tau_ideal"]*self.ikdot
+        self.solution["joint_power"] = self.solution['id'] * self.ikdot
+        self.solution["ik"] = self.ik
+        self.solution["ikdot"] = self.ikdot
+
+        if objective_function == 'min_pos_fiber_power':
+            self.solution['s_pos_power'] = sol.value(s_pos_power)
+            self.solution['s_neg_power'] = sol.value(s_neg_power)
+        if opt_var_info == 'tendon_stiffness':
+            self.solution['tendon_stiffness'] = sol.value(tendon_stiffness)
+
+        if bool_write_solution:
+            self.write_results()
+
+
+        return self.solution
+
+    def plot_exo_support(self):
+
+        # joint moments
+        plt.figure()
+        # loop over dofs
+        if len(self.dofs) == 1:
+            plt.plot(self.solution['t'], self.solution['tau_ideal'].T, label='ideal actuator')
+            plt.plot(self.solution['t'], self.solution['muscle_torque'].T, label='muscle torque')
+            plt.plot(self.solution['t'], self.solution['id'].T, label='inverse dynamics')
+            plt.plot(self.solution['t'], self.solution['tau_exo'].T, label='exoskeleton')
+        else:
+            for dof in range(len(self.dofs)):
+                plt.subplot(len(self.dofs), 1, dof + 1)
+                plt.plot(self.solution['t'], self.solution['tau_ideal'][dof, :].T, label='ideal actuator')
+                plt.plot(self.solution['t'], self.solution['muscle_torque'][dof, :].T, label='muscle torque')
+                plt.plot(self.solution['t'], self.solution['id'][dof, :].T, label='inverse dynamics')
+                plt.plot(self.solution['t'], self.solution['tau_exo'][dof, :].T, label='exoskeleton')
+                plt.xlabel('time [s]')
+                plt.ylabel('torque [Nm]')
+                plt.title(self.dofs[dof] + ' torque')
+        plt.legend()
+
+
+
+
+
 
 
 
