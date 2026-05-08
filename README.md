@@ -4,6 +4,29 @@ contains several python tools for workflows in opensim. I typically include this
 
 I stole some things from pyosim (InverseKinematics and InverseDynamics) and utilsTRC from OpenCap.
 
+## installation (conda)
+
+Use the conda environment file in this submodule.
+
+```powershell
+cd C:\Users\mat950\Documents\software\control\hilo_fes_cycling\external\osim_python_tools
+conda env create -f environment.yml
+conda activate opensim
+```
+
+If the environment already exists and you want to update it:
+
+```powershell
+conda env update -f environment.yml --prune
+conda activate opensim
+```
+
+Quick import check:
+
+```powershell
+python -c "import opensim, numpy, pandas; print('osim_python_tools environment OK')"
+```
+
 ## workfow
 
 The main worflow to process data assumes that you collected marker data (and potentially also ground reaction forces) and have already scaled your musculoskeletal model in opensim (.osim file). Scaling is intentionally not included in this processing pipeline as this step requires a manual check in my opinion.
