@@ -7,7 +7,7 @@ import os
 import numpy as np
 #mainfolder = str(Path(__file__).resolve().parents[1])
 # temp different
-mainfolder = str(Path(__file__).resolve().parents[0])
+mainfolder = str(Path(__file__).resolve().parents[1])
 sys.path.insert(0, mainfolder)
 print(mainfolder)
 
