@@ -178,13 +178,37 @@ def fit_polynomials_for_muscles(ik_data, lmt_data, dm_data, coordinates_fit,
                                 threshold_rmse_ydx=0.003,
                                 threshold_rel_err=0.05,
                                 min_moment_arm=1e-4):
-    # Convert to DataFrame if arrays are provided.
+    # Require labeled tabular inputs because downstream logic relies on
+    # column-name lookups for coordinates, muscles, and moment arms.
     if not isinstance(ik_data, pd.DataFrame):
-        ik_data = pd.DataFrame(ik_data)
+        raise TypeError(
+            "ik_data must be a pandas DataFrame with coordinate columns matching "
+            "coordinates_fit."
+        )
     if not isinstance(lmt_data, pd.DataFrame):
-        lmt_data = pd.DataFrame(lmt_data)
+        raise TypeError(
+            "lmt_data must be a pandas DataFrame with muscle columns."
+        )
     if not isinstance(dm_data, pd.DataFrame):
-        dm_data = pd.DataFrame(dm_data)
+        raise TypeError(
+            "dm_data must be a pandas DataFrame with moment-arm columns named "
+            "'<muscle>_<coordinate>'."
+        )
+
+    missing_coordinates = [c for c in coordinates_fit if c not in ik_data.columns]
+    if missing_coordinates:
+        raise ValueError(
+            "ik_data is missing required coordinate columns: "
+            + ", ".join(missing_coordinates)
+        )
+
+    if muscles_selected is not None:
+        missing_muscles = [m for m in muscles_selected if m not in lmt_data.columns]
+        if missing_muscles:
+            raise ValueError(
+                "lmt_data is missing required muscle columns: "
+                + ", ".join(missing_muscles)
+            )
 
     q_deg = ik_data[coordinates_fit].to_numpy()
     q = np.deg2rad(q_deg)

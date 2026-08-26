@@ -6,10 +6,10 @@ I stole some things from pyosim (InverseKinematics and InverseDynamics) and util
 
 ## installation (conda)
 
-Use the conda environment file in this submodule.
+Use the conda environment file in this submodule. Run these commands from the repository root (or `cd` into the cloned submodule directory that contains `environment.yml`).
 
 ```powershell
-cd C:\Users\mat950\Documents\software\control\hilo_fes_cycling\external\osim_python_tools
+cd <path-to-repo>
 conda env create -f environment.yml
 conda activate opensim
 ```

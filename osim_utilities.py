@@ -696,7 +696,7 @@ class osim_subject:
             muscles_selected=muscles_selected,
             order_bounds=(1, 5),
         )
-        self.muscle_poly_info = self.muscle_poly_info
+        self.muscle_poly_info = muscle_poly_info
         return muscle_poly_info
 
     # specific functions for project at Ajax:

@@ -1,6 +1,6 @@
-# simple test for debuggin code in surrogate_muscle_tendon_geom model
+# simple test for debugging code in surrogate_muscle_tendon_geom model
 
-# add path above this folder to the search directory so that I can acces osim_utilities.py
+# add path above this folder to the search directory so that I can access osim_utilities.py
 from pathlib import Path
 import sys
 import os
@@ -30,7 +30,7 @@ my_subject = osim_subject(model_path)
 coordinates = my_subject.coord_names
 muscles = my_subject.muscle_names
 
-# coordinates I want to use for fitting, all other coordinates should be locker
+# coordinates I want to use for fitting, all other coordinates should be locked
 # in their default position [I assume 0 for this model]
 coordinates_fit = ['hip_flexion_r','knee_angle_r','ankle_angle_r']
 lowerbound = [-70, -120, -40]
