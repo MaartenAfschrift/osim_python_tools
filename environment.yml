@@ -1,0 +1,16 @@
+name: opensim
+channels:
+  - opensim-org
+  - conda-forge
+dependencies:
+  - python=3.10
+  - opensim
+  - numpy
+  - pandas
+  - scipy
+  - matplotlib
+  - scikit-learn
+  - casadi
+  - pyqt
+  - pip
+

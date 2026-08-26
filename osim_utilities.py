@@ -9,6 +9,7 @@ from inverse_kinematics import InverseKinematics
 from kinematic_analyses import bodykinematics, lmt_api, moment_arm_api
 from general_utilities import readMotionFile, WriteMotionFile, lowPassFilterDataFrame
 import difflib
+from surrogate_muscle_tendon_geom import create_dummy_motion, fit_polynomials_for_muscles
 
 
 
@@ -68,6 +69,9 @@ class osim_subject:
         [self.modelmass, self.bodymass, self.bodynames]= self.getmodelmass()
         self.get_n_muscles()
         self.get_model_coordinates()
+
+        # fitted polynomials to muscle geometry
+        self.muscle_poly_info = None
 
 
     # read from opensim model
@@ -643,6 +647,58 @@ class osim_subject:
             marker_dir = Path(marker_dir)
         self.marker_dir = marker_dir
 
+
+
+    # Predictive simulation utilities
+    #-----------------------------------------
+    # this function fits polynomials to the muscle-tendon geometry of the muscles in this model
+    # this is mainly used for rapid evaluation of the muscle geometry (in predictive simulations
+    # or real-time control)
+    def fit_polynomial(self, coordinates_fit,
+                       coordinates_fit_lowerbound,
+                       coordinates_fit_upperbound,
+                       n_datapoints = 1000,
+                       coordinate_defaults = None,
+                       mot_outfile = None,
+                       muscles_selected = None):
+
+        if coordinate_defaults is None:
+            coordinate_defaults = [0.0] * len(self.coord_names)
+        if mot_outfile is None:
+            mot_outfile = os.path.join(os.getcwd(), 'dummy_lhs_ik.mot')
+
+        # create dummy motion
+        create_dummy_motion(self.coord_names, n_datapoints, coordinates_fit,
+                        coordinates_fit_lowerbound,
+                        coordinates_fit_upperbound,
+                        coordinate_defaults=coordinate_defaults,
+                        mot_outfile=mot_outfile)
+        # compute muscle-tendon length
+        self.set_ikfiles(mot_outfile)
+        self.compute_lmt()
+        self.compute_dM()
+
+        if muscles_selected is None:
+            # now we want to identify the muscles that span the selected coordinates coordinates_fit
+            # the easiest way is to identify all the muscles where the muscle-tendon length changes
+            # more than a specific threshold
+            muscles_selected = []
+            for m in self.muscle_names:
+                lmt_m = self.lmt_dat[0][m]
+                if (max(lmt_m) - min(lmt_m)) > 0.01:  # threshold for selecting muscles
+                    muscles_selected.append(m)
+
+        muscle_poly_info = fit_polynomials_for_muscles(
+            ik_data=self.ikdat[0],
+            lmt_data=self.lmt_dat[0],
+            dm_data=self.dm_dat[0],
+            coordinates_fit=coordinates_fit,
+            muscles_selected=muscles_selected,
+            order_bounds=(1, 5),
+        )
+        self.muscle_poly_info = muscle_poly_info
+        return muscle_poly_info
+
     # specific functions for project at Ajax:
     #------------------------------------------
 
@@ -706,8 +762,6 @@ class osim_subject:
             df = pd.concat([df, new_row], ignore_index=True)
         df.to_csv(outfile)
         print('printend timing hitting ball ', outfile)
-
-
 
 def transform(Rx, Ry, Rz, bool_deg_input = True):
     """
