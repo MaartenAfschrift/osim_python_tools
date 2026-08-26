@@ -70,7 +70,7 @@ class osim_subject:
         self.get_n_muscles()
         self.get_model_coordinates()
 
-        # fitted polynomials to musce geometry
+        # fitted polynomials to muscle geometry
         self.muscle_poly_info = None
 
 
