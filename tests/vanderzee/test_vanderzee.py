@@ -12,7 +12,7 @@ matplotlib.use('Qt5Agg') # interactive backend for matplotlib figures
 # ok dit werkt goed, eens testen of we niet een andere processing pass moeten gebruiken.
 # Nu ziet inverse dynamica data er heel heel ruizig uit. Andere optie is om dit te filteren
 
-bool_default_mrs = False
+bool_default_mrs = True
 bool_exo_mrs = True
 
 # to do: add controller die % inverse dynamica assistentie geeft
@@ -22,11 +22,11 @@ gen_osim_model = 'C:/Users/mat950/Documents/Software/general_tools/python_toolki
 
 datapath = 'C:/Users/mat950/OneDrive - Vrije Universiteit Amsterdam/Onderzoek/Data/VanDerZee'
 osim_model_path = os.path.join(datapath,'osim_models','p1.osim')
-ikfile_csv = os.path.join(datapath,'dynamics_processingpass','subject_1_11_IK_all.csv')
-idfile_csv = os.path.join(datapath,'dynamics_processingpass','subject_1_11_ID_all.csv')
-time_csv = os.path.join(datapath,'dynamics_processingpass','subject_1_11_time_all.csv')
-ikfile_mot = os.path.join(datapath,'dynamics_processingpass','subject_1_11_IK_all.mot')
-idfile_mot = os.path.join(datapath,'dynamics_processingpass','subject_1_11_ID_all.sto')
+ikfile_csv = os.path.join(datapath,'dynamics_processingpass','subject_1_20_IK_all.csv')
+idfile_csv = os.path.join(datapath,'dynamics_processingpass','subject_1_20_ID_all.csv')
+time_csv = os.path.join(datapath,'dynamics_processingpass','subject_1_20_time_all.csv')
+ikfile_mot = os.path.join(datapath,'dynamics_processingpass','subject_1_20_IK_all.mot')
+idfile_mot = os.path.join(datapath,'dynamics_processingpass','subject_1_20_ID_all.sto')
 
 # conver csv files to mot and sto files
 data_ik = pd.read_csv(ikfile_csv)
@@ -54,6 +54,7 @@ muscles = ['soleus_r','tib_ant_r']
 if bool_default_mrs:
     my_mrs = muscle_redundancy_solver(gen_osim_model, ikfile_mot,
                                       idfile_mot, dofs,muscles)
+    my_mrs.set_tendon_stiffness('soleus_r', 30)
     my_mrs.filter_inputs(cutoff_frequency=6)
     # test formulate and solve ocp
     my_mrs.formulate_solve_ocp(dt = 0.01, tstart = 2,tend = 8)
@@ -65,11 +66,11 @@ if bool_exo_mrs:
     my_mrs_exo = muscle_redundancy_solver_exo(gen_osim_model, ikfile_mot,
                                           idfile_mot, dofs,muscles)
     # set achilles tendon stiffness
-    my_mrs_exo.set_tendon_stiffness('soleus_r', 25)
-    my_mrs_exo.set_controller_type('percentage_id')
-    #my_mrs_exo.set_controller_type('percentage_id_shortening')
+    my_mrs_exo.set_tendon_stiffness('soleus_r', 30)
+    #my_mrs_exo.set_controller_type('percentage_id')
+    my_mrs_exo.set_controller_type('percentage_id_shortening')
     my_mrs_exo.set_dofs_acutated(dofs)
-    my_mrs_exo.set_percentage_id_assistance(0.1)
+    my_mrs_exo.set_percentage_id_assistance(0.5)
     # filter inputs
     my_mrs_exo.filter_inputs(cutoff_frequency=6)
     # test formulate and solve ocp
@@ -78,10 +79,10 @@ if bool_exo_mrs:
     my_mrs_exo.plot_exo_support()
 
     # test with higher assistance level
-    my_mrs_exo.set_percentage_id_assistance(0.7)
-    my_mrs_exo.formulate_solve_ocp(dt=0.01, tstart=2, tend=8)
-    my_mrs_exo.default_plot()
-    my_mrs_exo.plot_exo_support()
+    #my_mrs_exo.set_percentage_id_assistance(0.7)
+    #my_mrs_exo.formulate_solve_ocp(dt=0.01, tstart=2, tend=8)
+    #my_mrs_exo.default_plot()
+    #my_mrs_exo.plot_exo_support()
 
 
 

@@ -982,11 +982,17 @@ class muscle_redundancy_solver_exo(muscle_redundancy_solver):
     # we only need to overwrite the formulate_solve_ocp function
     def formulate_solve_ocp(self, dt = 0.01, tstart = None, tend = None, bool_static_opt = True,
                             bool_write_solution = True, objective_function = 'min_act',
-                            opt_var_info = 'default'):
+                            opt_var_info = 'default', bool_stance = False, bool_vector_stance = None,
+                            stance_vector_time = None):
         # additional features of the exoskeleton class
         #   - optimization variables for exoskeleton support
         #   - option to constrain exoskeleton torque to % id moment
         #   - option to develop exoskeleton controller that only assists when shortening
+
+        # option to provide only assistance during stance phase, if you want to do this
+        # you have to provide a vector with stance phase information
+        # bool_stance = Boolean if you want to provide only assistance during stance
+        # bool_vector_stance = vector with 0 and 1 with stance phase information
 
 
         # init degroote muscles (if needed)
@@ -1108,14 +1114,28 @@ class muscle_redundancy_solver_exo(muscle_redundancy_solver):
         # constraints on exoskeleton support
         #   option to specify degrees of freedom with exoskeleton ?
         #   option to constrain exoskeleton torque to % of id moment
+        if bool_stance and (bool_vector_stance is not None) and (stance_vector_time is not None):
+            # interpolate bool_vector_stance to current time vector
+            f_stance = np.interp(self.t, stance_vector_time, bool_vector_stance)
+            # get indices where f_stance is 1
+            f_stance = np.where(f_stance > 0.5)[0]
+        else:
+            f_stance = None
+
         tau_exo_constrained = ca.MX.zeros(ndof,N)
         if self.controller_type == 'percentage_id':
             for dof in range(ndof):
                 if self.dofs[dof] in self.dofs_acutated:
-                    tau_exo_constrained[dof,:] = self.percentage_id_assistance * self.id[dof,:]
+                    if f_stance is not None:
+                        # only during stance phase
+                        tau_exo_constrained[dof, f_stance] = self.percentage_id_assistance * self.id[dof, f_stance]
+                    else:
+                        # everything
+                        tau_exo_constrained[dof,:] = self.percentage_id_assistance * self.id[dof,:]
                 else:
+                    # no assistance
                     tau_exo_constrained[dof, : ] = 0
-            opti.subject_to(tau_exo - tau_exo_constrained == 0)
+
         elif self.controller_type == 'percentage_id_shortening':
             for dof in range(ndof):
                 if self.dofs[dof] in self.dofs_acutated:
@@ -1331,6 +1351,7 @@ class ideal_muscles_actuated(muscle_redundancy_solver):
         # - min_pos_fiber_power: minimize positive fiber power
         # - min_fiber_power_sq: minimize squared fiber power
 
+
         # init degroote muscles
         self.init_muscle_model(bool_overwrite=False)
 
@@ -1341,7 +1362,6 @@ class ideal_muscles_actuated(muscle_redundancy_solver):
             muscle_dyn_func = self.casadi_func_muscle_dyn(bool_opt_tendon_stiffness=True)
         if not(ignore_par_elastic):
             func_par_elastic = self.casadi_func_par_elastic_force()
-
 
 
         # get lmt dat if needed
